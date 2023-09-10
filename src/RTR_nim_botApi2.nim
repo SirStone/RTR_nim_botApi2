@@ -1,7 +1,23 @@
-# This is just an example to get you started. A typical library package
-# exports the main API in this file. Note that you cannot rename this file
-# but you can remove it if you wish.
+import std/[macros, sugar]
+import jsony
 
-proc add*(x, y: int): int =
-  ## Adds two numbers together.
-  return x + y
+macro gen_message*(): untyped = 
+  result = newNimNode(nnkTypeSection)
+  result.add(newNimNode(nnkTypeDef))
+  result[0].add(newNimNode(nnkPostfix))
+  result[0].add(ident("*"),ident("Message"))
+
+  hint("AST-->",result)
+  
+gen_message()
+
+proc json2message*(json_message:string):Message =
+  result = json_message.fromJson(Message)
+
+# dumpAstGen:
+#   type
+#     Message* = ref object of RootObj
+#       sessionId*:string
+#       `type`*:string
+#       pippo*:string = "pluto"
+  

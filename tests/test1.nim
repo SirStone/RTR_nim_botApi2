@@ -5,8 +5,20 @@
 #
 # To run these tests, simply execute `nimble test`.
 
-import unittest
+import std/[macros,strutils]
+import unittest, yaml
 
 import RTR_nim_botApi2
-test "can add":
-  check add(5, 5) == 10
+
+test "Can convert JSON message to native NIM object":
+  let json_message = """{"sessionId":"7vh2reL+TaeyXxEnN4Ngbg","name":"Robocode Tank Royale server","variant":"Tank Royale","version":"0.17.4","gameTypes":["classic","1v1"],"type":"ServerHandshake"}"""
+  let message:Message = RTR_nim_botApi2.json2message(json_message)
+  assert message.`type` == "ServerHandshake"
+  assert message.pippo == "pluto"
+  # RTR_nim_botApi2.hello()
+
+# test "Playing with macros":
+#   for line in lines "assets/tank-royale/schema/schemas/server-handshake.yaml":
+#     let exploded_line = line.split(":")
+#     echo $exploded_line
+
