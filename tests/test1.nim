@@ -11,11 +11,17 @@ import unittest, yaml
 import RTR_nim_botApi2
 
 test "Can convert JSON message to native NIM object":
+  # dumpAstGen:
+  #   type
+  #     MessageTest* = ref object of RootObj
+  #       sessionId*:string
+  #       `type`*:string
+  #       pippo*:string = "pluto"
+
   let json_message = """{"sessionId":"7vh2reL+TaeyXxEnN4Ngbg","name":"Robocode Tank Royale server","variant":"Tank Royale","version":"0.17.4","gameTypes":["classic","1v1"],"type":"ServerHandshake"}"""
   let message:Message = RTR_nim_botApi2.json2message(json_message)
   assert message.`type` == "ServerHandshake"
   assert message.pippo == "pluto"
-  # RTR_nim_botApi2.hello()
 
 # test "Playing with macros":
 #   for line in lines "assets/tank-royale/schema/schemas/server-handshake.yaml":
