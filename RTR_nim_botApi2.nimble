@@ -66,17 +66,14 @@ task asset_schemas, "checks and downloads the asset schemas":
     exec "mkdir -p " & asset_folder
 
   if not fileExists(asset_folder & "/README.md"):
-    # name of the file containing the list of the files to download
-    let download_list = asset_folder & "/download_list.txt"
-
-    # make sure the download list is empty
-    exec "echo '' > " & download_list
-
-    # Getting the file lists of the schamas folder from the Robocode Tank Royale git repo
-    echo "curl " & RTR_api_repos & "/contents/schema/schemas " & "| grep download_url | cut -d'\"' -f4 >> " & download_list
+    # echo "curl " & RTR_api_repos & "/contents/schema/schemas " & "| grep download_url | cut -d'\"' -f4 >> " & download_list
+    exec "curl " & RTR_api_repos & "/contents/schema/schemas " & "| grep download_url | cut -d'\"' -f4 | xargs wget -q -nH --cut-dirs=4 --directory-prefix=" & asset_folder
 
 # before build we need...
 before build:
   # ...to check and download the asset tank-royale
   # asset_tankRoyaleTask()
+  asset_schemasTask()
+
+before test:
   asset_schemasTask()
