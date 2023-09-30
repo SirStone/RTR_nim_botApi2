@@ -1,7 +1,7 @@
 import streams
 
 # Package
-version       = "0.0.1"
+version       = "0.0.2"
 author        = "SirStone"
 description   = "Version2 of this library, for nim2.0"
 license       = "GPL-3.0-only"
@@ -9,8 +9,7 @@ srcDir        = "src"
 
 # Dependencies
 requires "nim >= 2.0.0"
-requires "yaml >= 0.1.0"
-requires "jsony >= 1.1.3"
+requires "jsony >= 0.1.0"
 
 # Robocode Tank Royale Version/Tag
 let RTR_Version = "v0.19.3"
@@ -70,10 +69,10 @@ task asset_schemas, "checks and downloads the asset schemas":
     exec "curl " & RTR_api_repos & "/contents/schema/schemas " & "| grep download_url | cut -d'\"' -f4 | xargs wget -q -nH --cut-dirs=4 --directory-prefix=" & asset_folder
 
 # before build we need...
-before build:
+# before build:
   # ...to check and download the asset tank-royale
-  # asset_tankRoyaleTask()
-  asset_schemasTask()
+  # asset_tankRoyaleTask() //not required
+  # asset_schemasTask() //not required
 
-before test:
-  asset_schemasTask()
+# before test:
+  # asset_schemasTask() //not required

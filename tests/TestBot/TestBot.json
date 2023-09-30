@@ -1,0 +1,19 @@
+{
+    "name": "TestBot",
+    "version": "0.1.0",
+    "gameTypes": [
+        "melee",
+        "classic",
+        "1v1"
+    ],
+    "authors": [
+        "SirStone"
+    ],
+    "description": "TestBot made in Nim",
+    "homepage": "",
+    "countryCodes": [
+        "it"
+    ],
+    "platform": "MacOS",
+    "programmingLang": "NIM"
+}

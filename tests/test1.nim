@@ -5,26 +5,57 @@
 #
 # To run these tests, simply execute `nimble test`.
 
-import std/[macros,strutils]
-import unittest, yaml
+import std/[times, sugar, os]
+import unittest
+import json
 
 import RTR_nim_botApi2
 
-test "Can convert JSON message to native NIM object":
-  # dumpAstGen:
-  #   type
-  #     MessageTest* = ref object of RootObj
-  #       sessionId*:string
-  #       `type`*:string
-  #       pippo*:string = "pluto"
+suite "RTR_bim_api tests":
+  test "Can convert JSON message to native NIM object":
+    # dumpAstGen:
+    #   type
+    #     MessageTest* = ref object of RootObj
+    #       sessionId*:string
+    #       `type`*:string
+    #       pippo*:string = "pluto"
 
-  let json_message = """{"sessionId":"7vh2reL+TaeyXxEnN4Ngbg","name":"Robocode Tank Royale server","variant":"Tank Royale","version":"0.17.4","gameTypes":["classic","1v1"],"type":"ServerHandshake"}"""
-  let message:Message = RTR_nim_botApi2.json2message(json_message)
-  assert message.`type` == "ServerHandshake"
-  assert message.pippo == "pluto"
+    let json_message = """{"sessionId":"7vh2reL+TaeyXxEnN4Ngbg","name":"Robocode Tank Royale server","variant":"Tank Royale","version":"0.17.4","gameTypes":["classic","1v1"],"type":"ServerHandshake"}"""
+    # let message:Message = RTR_nim_botApi2.json2message(json_message)
+    # assert message.`type` == "ServerHandshake"
+    # assert message.pippo == "pluto"
 
-# test "Playing with macros":
-#   for line in lines "assets/tank-royale/schema/schemas/server-handshake.yaml":
-#     let exploded_line = line.split(":")
-#     echo $exploded_line
+    let message:Message = RTR_nim_botApi2.json2message(json_message)
 
+    check(message.`type` is Type)
+    check(message.`type` == Type.serverHandshake)
+
+  test "JSONY method used is faster than JSON":
+    let json_message = """{"sessionId":"7vh2reL+TaeyXxEnN4Ngbg","name":"Robocode Tank Royale server","variant":"Tank Royale","version":"0.17.4","gameTypes":["classic","1v1"],"type":"ServerHandshake"}"""
+
+    let times = 10
+    # jsony
+    var startt_jsony = cpuTime()
+    for i in 1..times:
+      discard RTR_nim_botApi2.json2message(json_message)
+    var endt_jsony = cpuTime() - startt_jsony
+
+    # json
+    var startt_json = cpuTime()
+    for i in 1..times:
+      discard parseJson(json_message)
+    var endt_json = cpuTime() - startt_json
+
+    check(endt_jsony < endt_json)
+
+    let percent = 100 * endt_jsony / endt_json
+    echo "JSONY method is " & $percent & "% times faster than standard JSON"
+
+  test "Bot creation":
+    var testBot = Bot.conf("TestBot/TestBot.json")
+    start testBot
+
+method run(bot:Bot) =
+  dump("Running bot " & bot.name)
+  check bot.name == "TestBot"
+  check bot.authors[0] == "SirStone"
