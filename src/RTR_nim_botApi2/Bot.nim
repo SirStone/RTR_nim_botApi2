@@ -31,8 +31,7 @@ proc conf*(json_file: string): Bot =
     quit(1)
 
 # the following section contains all the methods that are supposed to be overrided by the bot creator
-method run*(bot:BluePrint) {.base.} =
-  dump("Bot " & bot.name & " is not running because the run method is not overrided")
+method run*(bot:BluePrint) {.base gcsafe.} = discard
 method onGameAborted(bot:Bot, gameAbortedEvent:GameAbortedEvent) {.base.} = discard
 method onGameEnded(bot:Bot, gameEndedEventForBot:GameEndedEventForBot) {.base.} = discard
 method onGameStarted(bot:Bot, gameStartedEventForBot:GameStartedEventForBot) {.base.} = discard

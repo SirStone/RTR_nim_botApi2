@@ -1,11 +1,10 @@
 import ../../src/RTR_nim_botApi2
 # import std/[os, random, math]
 
-type TestBot = ref object of Bot
 
-let bot = TestBot()
+let testBot = Bot.conf("TestBot.json")
 
-bot.conf("TestBot.json")
+start testBot
 
-method run(bot:TestBot) =
+method run(bot:Bot) =
   echo "Bot", bot.name, " started"

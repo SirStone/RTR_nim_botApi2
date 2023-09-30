@@ -5,7 +5,7 @@
 #
 # To run these tests, simply execute `nimble test`.
 
-import std/[times, sugar, os]
+import std/[os, times, sugar]
 import unittest
 import json
 
@@ -52,10 +52,13 @@ suite "RTR_bim_api tests":
     echo "JSONY method is " & $percent & "% times faster than standard JSON"
 
   test "Bot creation":
-    var testBot = Bot.conf("TestBot/TestBot.json")
+    var testBot = Bot.conf("../../tests/TestBot/TestBot.json")
     start testBot
 
 method run(bot:Bot) =
   dump("Running bot " & bot.name)
   check bot.name == "TestBot"
   check bot.authors[0] == "SirStone"
+  for i in 1..5:
+    sleep 1000
+    echo "Running...",i

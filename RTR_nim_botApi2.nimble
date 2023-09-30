@@ -1,11 +1,12 @@
 import streams
 
 # Package
-version       = "0.0.2"
+version       = "0.0.3"
 author        = "SirStone"
 description   = "Version2 of this library, for nim2.0"
 license       = "GPL-3.0-only"
 srcDir        = "src"
+binDir        = "bin"
 
 # Dependencies
 requires "nim >= 2.0.0"
