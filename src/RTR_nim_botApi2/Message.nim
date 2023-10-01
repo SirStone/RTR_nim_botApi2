@@ -31,8 +31,11 @@ type
     skippedTurnEvent = "SkippedTurnEvent"
     startGame = "StartGame"
     stopGame = "StopGame"
+    teamMessage = "TeamMessage"
+    teamMessageEvent = "TeamMessageEvent"
     tickEventForBot = "TickEventForBot"
     tickEventForObserver = "TickEventForObserver"
+    tpsChangedEvent = "TpsChangedEvent"
     wonRoundEvent = "WonRoundEvent"
   
   Message* = ref object of RootObj
@@ -98,6 +101,9 @@ type
     scanColor*: string #New color of the scan arc
     tracksColor*: string #New color of the tracks
     gunColor*: string #New color of the gun
+    stdOut*: string #New text received from standard output (stdout)
+    stdErr*: string #New text received from standard error (stderr)
+    teamMessages*: seq[TeamMessage] #Messages to send to one or more individual teammates or broadcast to the entire team
 
   BotListUpdate* = ref object of Message
     bots*: seq[BotInfo] #List of bots
@@ -276,6 +282,10 @@ type
   SkippedTurnEvent* = ref object of Event
 
   StopGame* = ref object of Message
+
+  TeamMessage* = ref object of Message
+    receiverId*: int #The id of the receiver teammate. If omitted, the message is broadcast to all teammates
+    description*: string #Message sent between teammates
 
   TickEventForBot* = ref object of Event
     roundNumber*: int #The current round number in the battle when event occurred

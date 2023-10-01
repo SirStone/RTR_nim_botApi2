@@ -53,12 +53,26 @@ suite "RTR_bim_api tests":
 
   test "Bot creation":
     var testBot = Bot.conf("../../tests/TestBot/TestBot.json")
-    start testBot
+    startBot testBot
+    stdout testBot,"Bot created and started"
+    check testBot.intent.stdOut == "Bot created and started\n"
+    stderr testBot,"FAKE ERROR"
+    check testBot.intent.stdErr == "FAKE ERROR\n"
 
 method run(bot:Bot) =
-  dump("Running bot " & bot.name)
+  stdout bot,"Running bot " & bot.name
   check bot.name == "TestBot"
   check bot.authors[0] == "SirStone"
-  for i in 1..5:
+
+  bot.secret = "secret"
+
+  check bot.secret == "secret"
+
+  echo "Running bot"
+  go bot
+  var i = 1
+  while bot.running:
     sleep 1000
     echo "Running...",i
+    go bot
+    i += 1

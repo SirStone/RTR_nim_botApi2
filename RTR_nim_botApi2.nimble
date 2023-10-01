@@ -1,7 +1,7 @@
 import streams
 
 # Package
-version       = "0.0.3"
+version       = "0.0.4"
 author        = "SirStone"
 description   = "Version2 of this library, for nim2.0"
 license       = "GPL-3.0-only"
@@ -11,6 +11,7 @@ binDir        = "bin"
 # Dependencies
 requires "nim >= 2.0.0"
 requires "jsony >= 0.1.0"
+requires "ws >= 0.1.0"
 
 # Robocode Tank Royale Version/Tag
 let RTR_Version = "v0.19.3"
