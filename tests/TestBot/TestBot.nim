@@ -15,10 +15,10 @@ method run(bot:Bot) =
     sleep 1000
 
 method onConnect(bot:Bot) =
-  logout bot, bot.name & "[TestBot] Connected"
+  logout bot, "[TestBot] I'm connected! Yuppy!"
 
 method onConnectionError(bot:Bot, error:string) =
-  logerr bot,"Connection error:" & error
+  logerr bot,"[TestBot]Connection error:" & error
 
 method onSkippedTurn(bot:Bot, skippedTurnEvent:SkippedTurnEvent) =
-  logerr bot,"Skipped turn: " & $skippedTurnEvent.turnNumber
+  logerr bot,"[TestBot]Skipped turn: " & $skippedTurnEvent.turnNumber

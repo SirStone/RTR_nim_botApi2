@@ -19,6 +19,6 @@ while getopts 'u:s:' flag; do
 done
 
 # Remove the extension from the file name
-bot_name=${script_name%.*}
+bot_name="TestBot"
 
-$script_dir/$bot_name
+nim c --run $script_dir/$bot_name.nim
