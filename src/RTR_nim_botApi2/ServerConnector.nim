@@ -12,12 +12,10 @@ proc handleMessage(bot:Bot, json_message:string, gs_ws:WebSocket) {.async.} =
     let server_handshake = (ServerHandshake)message
     let bot_handshake = BotHandshake(`type`:Type.botHandshake, sessionId:server_handshake.sessionId, name:bot.name, version:bot.version, authors:bot.authors, secret:bot.secret, initialPosition:bot.initialPosition)
     await gs_ws.send(bot_handshake.toJson)
-  
-  of gameStartedEventForBot:
-    # in case the bot is still running from a previous game we stop it
-    # stopBot() #TODO: check if this is still required
 
+  of gameStartedEventForBot:
     let game_started_event_for_bot = (GameStartedEventForBot)message
+
     # store the Game Setup for the bot usage
     bot.gameSetup = game_started_event_for_bot.gameSetup
     bot.myId = game_started_event_for_bot.myId
@@ -29,8 +27,6 @@ proc handleMessage(bot:Bot, json_message:string, gs_ws:WebSocket) {.async.} =
     await gs_ws.send(BotReady(`type`:Type.botReady).toJson)
 
   of tickEventForBot:
-    bot.connected = true
-
     let tick_event_for_bot = (TickEventForBot)message
     bot.botState = tick_event_for_bot.botState
 
@@ -106,17 +102,30 @@ proc handleMessage(bot:Bot, json_message:string, gs_ws:WebSocket) {.async.} =
 
   else: echo "NOT HANDLED MESSAGE: ",json_message
 
-
-proc talkWithGS*(bot:Bot, url:string) {.async.} =
+proc connect*(bot:Bot):Future[WebSocket] {.async.} =
+  echo "[connect] connecting to ", bot.serverConnectionURL
   try: # try a websocket connection to server
-    var gs_ws = await newWebSocket(url)
+    var gs_ws = await newWebSocket(bot.serverConnectionURL)
+    echo "[connect] WebSocket connected"
 
     if(gs_ws.readyState == Open):
-      onConnected bot,url
+      # notify bot that the connection is open
+      bot.connected = true
+      onConnect bot
+      echo "[connect] connection is Open"
+    
+    return gs_ws
+  except CatchableError:
+    echo "[connect] CatchableError: ", getCurrentExceptionMsg()
+    bot.connected = false
+    bot.onConnectionError(getCurrentExceptionMsg())
+  return nil
 
+proc listen*(bot:Bot, gs_ws:WebSocket) {.async.} =
+  echo "[listen] connecting to ", bot.serverConnectionURL
+  try: # try a websocket connection to server
     # while the connection is open...
     while(gs_ws.readyState == Open):
-
       # listen for a message
       let json_message = await gs_ws.receiveStrPacket()
 
@@ -126,5 +135,9 @@ proc talkWithGS*(bot:Bot, url:string) {.async.} =
       # send the message to an handler 
       asyncCheck handleMessage(bot, json_message, gs_ws)
 
+    bot.connected = false
+
   except CatchableError:
+    echo "[listen] CatchableError: ", getCurrentExceptionMsg()
+    bot.connected = false
     bot.onConnectionError(getCurrentExceptionMsg())

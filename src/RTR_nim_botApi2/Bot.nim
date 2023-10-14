@@ -1,5 +1,5 @@
 import Message
-import std/[os, sugar]
+import std/[os]
 import jsony
 
 type
@@ -18,18 +18,18 @@ type
     # filled from the environment or during the run
     secret*:string
     serverConnectionURL*:string
-    connected*:bool = false
     initialPosition*:InitialPosition
     gameSetup*:GameSetup
     myId*:int
     turnNumber*:int
     roundNumber*:int
     botState*:BotState
-    remainingDistance*:float # The remianing distance to cover
+    remainingDistance*:float # The remaining distance to cover
     intent*:BotIntent = BotIntent(`type`: Type.botIntent)
 
     # usage during the games
     running*:bool = false
+    connected*:bool = false
 
   Bot* = ref object of BluePrint
 
@@ -58,7 +58,7 @@ method onSkippedTurn*(bot:BluePrint, skippedTurnEvent:SkippedTurnEvent) {.base.}
 method onScannedBot*(bot:BluePrint, scannedBotEvent:ScannedBotEvent) {.base.} = discard
 method onTick*(bot:BluePrint, tickEventForBot:TickEventForBot) {.base.} = discard
 method onDeath*(bot:BluePrint, botDeathEvent:BotDeathEvent) {.base.} =  discard
-method onConnected*(bot:BluePrint, url:string) {.base.} = discard
+method onConnect*(bot:BluePrint) {.base.} = discard
 method onConnectionError*(bot:BluePrint, error:string) {.base.} = discard
 
 proc isRunning*(bot:BluePrint):bool = bot.running

@@ -5,7 +5,7 @@
 #
 # To run these tests, simply execute `nimble test`.
 
-import std/[os, times, sugar]
+import std/[os, times]
 import unittest
 import json
 
@@ -54,13 +54,13 @@ suite "RTR_bim_api tests":
   test "Bot creation":
     var testBot = Bot.conf("../../tests/TestBot/TestBot.json")
     startBot testBot
-    stdout testBot,"Bot created and started"
+    logout testBot,"Bot created and started"
     check testBot.intent.stdOut == "Bot created and started\n"
-    stderr testBot,"FAKE ERROR"
+    logerr testBot,"FAKE ERROR"
     check testBot.intent.stdErr == "FAKE ERROR\n"
 
 method run(bot:Bot) =
-  stdout bot,"Running bot " & bot.name
+  logout bot,"Running bot " & bot.name
   check bot.name == "TestBot"
   check bot.authors[0] == "SirStone"
 

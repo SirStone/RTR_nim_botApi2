@@ -24,4 +24,4 @@ echo "SERVER SECRET:$SERVER_SECRET"
 # Remove the extension from the file name
 bot_name=${script_name%.*}
 
-$script_dir/$bot_name
+nim c --run $script_dir/$bot_name.nim

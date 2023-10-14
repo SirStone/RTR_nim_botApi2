@@ -1,15 +1,15 @@
-import std/[os, sugar]
-import RTR_nim_botApi2/[Message, Bot]
+import std/[os]
+import asyncdispatch
+import RTR_nim_botApi2/[Message, Bot, ServerConnector]
 
 export Message, Bot
 
-
-template stdout* (bot:Bot, x:string) =
+template `logout`* (bot:Bot, x:string) =
   stdout.writeLine(x)
   # stdout.flushFile
   bot.intent.stdOut &= x & "\n"
 
-template stderr* (bot:Bot, x:string) =
+template `logerr`* (bot:Bot, x:string) =
   stderr.writeLine(x)
   # stderr.flushFile
   bot.intent.stdErr &= x & "\n"
@@ -19,10 +19,10 @@ proc go*(bot:Bot) =
   echo "Sending intent to server"
 
   # build the intent to send to the game server
-  let intent = BotIntent(`type`: Type.botIntent)
+  bot.intent = BotIntent(`type`: Type.botIntent)
 
   # send the intent to the game server
-  echo intent[]
+  echo bot.intent[]
 
 proc botWorker(bot:Bot) {.thread.} =
   # While the bot is connected to the server the bot thread should live
@@ -62,13 +62,22 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
 
     if bot.serverConnectionURL == "": 
       bot.serverConnectionURL = getEnv("SERVER_URL", "ws://localhost:7654")
+    
+    echo "bot.secret: " & bot.secret
 
+    # connect to the server
+    let gs_ws = waitFor connect bot
+    
     # run the bot thread
     # This thread runs untile the bot is disconnected from the server so
     # logically the connection must happen before this point
     var botRunner: Thread[bot.type]
     createThread botRunner, botWorker, bot
+
+    # Start listening for messages from the server
+    waitFor listen(bot,gs_ws)
     
     # Waiting for the bot thread to finish
     joinThread botRunner
+    
     echo "[startBot]connection ended and bot thread finished. Bye!"
