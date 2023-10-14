@@ -1,10 +1,19 @@
-import std/[strutils]
+import std/[strutils, locks]
 import Bot, Message
 import asyncdispatch, ws, jsony, json
+
+# globals
+var
+  connectedLock*:Lock
+  connectedCond*:Cond
+  runningLock*:Lock
+  runningCond*:Cond
 
 proc handleMessage(bot:Bot, json_message:string, gs_ws:WebSocket) {.async.} =
   # Convert the json to a Message object
   let message = json2message json_message
+
+  bot.lastMessageType = message.`type`
 
   # 'case' switch over type
   case message.`type`:
@@ -35,6 +44,8 @@ proc handleMessage(bot:Bot, json_message:string, gs_ws:WebSocket) {.async.} =
 
     # activating the bot method
     bot.onTick(tick_event_for_bot)
+
+    withLock(runningLock): signal(runningCond)
 
     # for every event inside this tick call the relative event for the bot
     for event in tick_event_for_bot.events:
@@ -109,10 +120,11 @@ proc connect*(bot:Bot):Future[WebSocket] {.async.} =
     echo "[connect] WebSocket connected"
 
     if(gs_ws.readyState == Open):
+      echo "[connect] connection is Open"
       # notify bot that the connection is open
+      withLock(connectedLock): signal(connectedCond)
       bot.connected = true
       onConnect bot
-      echo "[connect] connection is Open"
     
     return gs_ws
   except CatchableError:
@@ -122,7 +134,7 @@ proc connect*(bot:Bot):Future[WebSocket] {.async.} =
   return nil
 
 proc listen*(bot:Bot, gs_ws:WebSocket) {.async.} =
-  echo "[listen] connecting to ", bot.serverConnectionURL
+  echo "[listen] start listening for messages from ", bot.serverConnectionURL
   try: # try a websocket connection to server
     # while the connection is open...
     while(gs_ws.readyState == Open):
@@ -139,5 +151,10 @@ proc listen*(bot:Bot, gs_ws:WebSocket) {.async.} =
 
   except CatchableError:
     echo "[listen] CatchableError: ", getCurrentExceptionMsg()
+    case bot.lastMessageType:
+    of serverHandshake:
+      echo "[listen] Server Handshake failed, probably the secret is wrong"
+    else:
+      echo "[listen] error, last message that probably caused the error: ", $bot.lastMessageType
     bot.connected = false
     bot.onConnectionError(getCurrentExceptionMsg())

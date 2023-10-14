@@ -30,6 +30,7 @@ type
     # usage during the games
     running*:bool = false
     connected*:bool = false
+    lastMessageType*:Type
 
   Bot* = ref object of BluePrint
 

@@ -1,4 +1,4 @@
-import std/[os]
+import std/[os, locks]
 import asyncdispatch
 import RTR_nim_botApi2/[Message, Bot, ServerConnector]
 
@@ -26,17 +26,20 @@ proc go*(bot:Bot) =
 
 proc botWorker(bot:Bot) {.thread.} =
   # While the bot is connected to the server the bot thread should live
-  while bot.connected:
-    # First is waiting doing nothing for the bot to be in running state
-    while not isRunning(bot) and bot.connected: discard
+  echo "[botWorker] waiting for connection"
+  wait(connectedCond, connectedLock)
+    
+  echo "[botWorker] waiting for running"
+  # First is waiting doing nothing for the bot to be in running state
+  wait(runningCond, runningLock)
 
-    # Second run the bot 'run()' method, the one scripted by the bot creator
-    # this could be going in loop until the bot is dead or could finish up quckly or could be that is not implemented at all
-    run bot
+  # Second run the bot 'run()' method, the one scripted by the bot creator
+  # this could be going in loop until the bot is dead or could finish up quckly or could be that is not implemented at all
+  run bot
 
-    # Third, when the bot creator's 'run()' exits, if the bot is still runnning, we send the intent automatically
-    while isRunning(bot) and bot.connected:
-      go bot
+  # Third, when the bot creator's 'run()' exits, if the bot is still runnning, we send the intent automatically
+  while isRunning(bot) and bot.connected:
+    go bot
   echo "[botWorker]bot is not connected. Bye!"
 
 proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialPosition(x:0,y:0,angle:0)) =
@@ -55,6 +58,12 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
   # set the initial position, is the server that will decide to use it or not
   bot.initialPosition = position
 
+  # init the locks and conditions
+  initLock connectedLock
+  initCond connectedCond
+  initLock runningLock
+  initCond runningCond
+
   # connect to the Game Server
   if(connect):
     if bot.secret == "":
@@ -62,22 +71,31 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
 
     if bot.serverConnectionURL == "": 
       bot.serverConnectionURL = getEnv("SERVER_URL", "ws://localhost:7654")
-    
-    echo "bot.secret: " & bot.secret
 
-    # connect to the server
-    let gs_ws = waitFor connect bot
-    
     # run the bot thread
     # This thread runs untile the bot is disconnected from the server so
     # logically the connection must happen before this point
     var botRunner: Thread[bot.type]
-    createThread botRunner, botWorker, bot
+
+    # create the thread
+    withLock connectedLock:
+      withLock runningLock:
+        createThread botRunner, botWorker, bot
+    
+    # connect to the server
+    let gs_ws = waitFor connect(bot)
 
     # Start listening for messages from the server
     waitFor listen(bot,gs_ws)
     
     # Waiting for the bot thread to finish
+    wait(connectedCond, connectedLock)
+    wait(runningCond, runningLock)
     joinThread botRunner
+
+  deinitLock connectedLock
+  deinitCond connectedCond
+  deinitLock runningLock
+  deinitCond runningCond
     
-    echo "[startBot]connection ended and bot thread finished. Bye!"
+  echo "[startBot]connection ended and bot thread finished. Bye!"
