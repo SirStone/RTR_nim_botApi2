@@ -36,22 +36,25 @@ proc botWorker(bot:Bot) {.thread.} =
   # While the bot is connected to the server the bot thread should live
   echo "[botWorker] waiting for connection"
   wait connectedCond, botWorker_connectedLock
-    
-  echo "[botWorker] waiting for running"
-  # First is waiting doing nothing for the bot to be in running state
-  wait runningCond, runningLock
 
-  # Second run the bot 'run()' method, the one scripted by the bot creator
-  # this could be going in loop until the bot is dead or could finish up quckly or could be that is not implemented at all
-  run bot
+  while bot.connected:
+    echo "[botWorker] waiting for running"
+    # First is waiting doing nothing for the bot to be in running state
+    wait runningCond, runningLock
 
-  echo "[botWorker] automatic GO started"
-  # Third, when the bot creator's 'run()' exits, if the bot is still runnning, we send the intent automatically
-  while isRunning(bot) and bot.connected:
-    discard go bot
-  echo "[botWorker] isRunning(bot): ", isRunning(bot)
-  echo "[botWorker] bot.connected: ", bot.connected
-  echo "[botWorker] automatic GO ended"
+    # Second run the bot 'run()' method, the one scripted by the bot creator
+    # this could be going in loop until the bot is dead or could finish up quckly or could be that is not implemented at all
+    run bot
+
+    echo "[botWorker] automatic GO started"
+    # Third, when the bot creator's 'run()' exits, if the bot is still runnning, we send the intent automatically
+    while isRunning(bot):
+      discard go bot
+    echo "[botWorker] isRunning(bot): ", isRunning(bot)
+    echo "[botWorker] bot.connected: ", bot.connected
+
+    echo "[botWorker] automatic GO ended"
+  echo "[botWorker] QUIT"
 
 proc intentWorker(bot:Bot) =
   bot.talkerReady = true

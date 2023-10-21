@@ -22,3 +22,4 @@ done
 bot_name="TestBot"
 
 nim c --run $script_dir/$bot_name.nim
+rm $script_dir/$bot_name
