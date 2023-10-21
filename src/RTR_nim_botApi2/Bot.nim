@@ -1,6 +1,6 @@
-import Message
+import Schema
 import std/[os]
-import jsony
+import jsony, whisky
 
 type
   BluePrint = ref object of RootObj
@@ -28,21 +28,27 @@ type
     intent*:BotIntent = BotIntent(`type`: Type.botIntent)
 
     # usage during the games
+    botReady*:bool = false
+    listenerReady*:bool = false
+    talkerReady*:bool = false
     running*:bool = false
     connected*:bool = false
     lastMessageType*:Type
+    gs_ws*:WebSocket
 
   Bot* = ref object of BluePrint
 
-proc conf*(json_file: string): Bot =
+proc newBot*(json_file: string): Bot =
   # read the config file from disk
   try:
     # build the bot from the json
-    let bot = readFile(joinPath(getAppDir(),json_file)).fromJson(Bot)
+    let path:string = joinPath(getAppDir(),json_file)
+    let content:string = readFile(path)
+    let bot:Bot = content.fromJson(Bot)
     # maybe code here ...
     return bot
   except IOError as e:
-    echo "Error reading config file: ", e.msg
+    echo "[conf] Error reading config file: ", e.msg
     quit(1)
 
 # the following section contains all the methods that are supposed to be overrided by the bot creator

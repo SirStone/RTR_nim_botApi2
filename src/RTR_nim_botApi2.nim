@@ -1,8 +1,8 @@
 import std/[os, locks]
-import asyncdispatch
-import RTR_nim_botApi2/[Message, Bot, ServerConnector]
+import whisky
+import RTR_nim_botApi2/[Schema, Bot, ServerConnector]
 
-export Message, Bot
+export Schema, Bot
 
 template `logout`* (bot:Bot, x:string) =
   stdout.writeLine(x)
@@ -14,33 +14,59 @@ template `logerr`* (bot:Bot, x:string) =
   # stderr.flushFile
   bot.intent.stdErr &= x & "\n"
 
-proc go*(bot:Bot) =
-  # Sending intent to server
-  echo "Sending intent to server"
+var lastIntent_turn:int = -1
+proc go*(bot:Bot):bool =
+  # Sending intent to server if the last turn we sent it is different from the current turn
+  if bot.turnNumber == lastIntent_turn: return false
+
+  # update the last turn we sent the intent
+  lastIntent_turn = bot.turnNumber
 
   # build the intent to send to the game server
   bot.intent = BotIntent(`type`: Type.botIntent)
 
-  # send the intent to the game server
-  echo bot.intent[]
+  # signal to send the intent to the game server
+  broadcast intentCond
+  return true
 
 proc botWorker(bot:Bot) {.thread.} =
+  bot.botReady = true
+  echo "[botWorker] READY!"
+
   # While the bot is connected to the server the bot thread should live
   echo "[botWorker] waiting for connection"
-  wait(connectedCond, connectedLock)
+  wait connectedCond, botWorker_connectedLock
     
   echo "[botWorker] waiting for running"
   # First is waiting doing nothing for the bot to be in running state
-  wait(runningCond, runningLock)
+  wait runningCond, runningLock
 
   # Second run the bot 'run()' method, the one scripted by the bot creator
   # this could be going in loop until the bot is dead or could finish up quckly or could be that is not implemented at all
   run bot
 
+  echo "[botWorker] automatic GO started"
   # Third, when the bot creator's 'run()' exits, if the bot is still runnning, we send the intent automatically
   while isRunning(bot) and bot.connected:
-    go bot
-  echo "[botWorker]bot is not connected. Bye!"
+    discard go bot
+  echo "[botWorker] isRunning(bot): ", isRunning(bot)
+  echo "[botWorker] bot.connected: ", bot.connected
+  echo "[botWorker] automatic GO ended"
+
+proc intentWorker(bot:Bot) =
+  bot.talkerReady = true
+  echo "[intentWorker] READY!"
+
+  echo "[intentWorker] waiting for connection"
+  # wait for the connection
+  wait connectedCond, intentWorker_connectedLock
+
+  echo "[intentWorker] connection received, start talking"
+  while true:
+    wait intentCond, intentLock
+    bot.gs_ws.send(schema2json bot.intent)
+
+  echo "[intentWorker] QUIT"
 
 proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialPosition(x:0,y:0,angle:0)) =
   ## **Start the bot**
@@ -59,10 +85,13 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
   bot.initialPosition = position
 
   # init the locks and conditions
-  initLock connectedLock
+  initLock botWorker_connectedLock
+  initLock intentWorker_connectedLock
   initCond connectedCond
   initLock runningLock
   initCond runningCond
+  initLock intentLock
+  initCond intentCond
 
   # connect to the Game Server
   if(connect):
@@ -72,30 +101,71 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
     if bot.serverConnectionURL == "": 
       bot.serverConnectionURL = getEnv("SERVER_URL", "ws://localhost:7654")
 
-    # run the bot thread
-    # This thread runs untile the bot is disconnected from the server so
-    # logically the connection must happen before this point
-    var botRunner: Thread[bot.type]
+    # runners for the 3 main threads
+    var
+      botRunner: Thread[bot.type]
+      intentRunner: Thread[bot.type]
 
-    # create the thread
-    withLock connectedLock:
+    # create the threads
+    withLock botWorker_connectedLock:
       withLock runningLock:
         createThread botRunner, botWorker, bot
-    
-    # connect to the server
-    let gs_ws = waitFor connect(bot)
 
-    # Start listening for messages from the server
-    waitFor listen(bot,gs_ws)
+    withLock intentWorker_connectedLock:
+      withLock intentLock:
+        createThread intentRunner, intentWorker, bot
+
+    # connect to the server
+    bot.gs_ws = newWebSocket(bot.serverConnectionURL)
+
+    # wait for the threads to be ready
+    echo "[startBot] waiting for bot and intent threads to be ready"
+    while not bot.botReady or not bot.talkerReady: sleep(100)
+    echo "[startBot] bot and intent threads are ready: ", bot.botReady, bot.talkerReady
+
+    withLock botWorker_connectedLock:
+      withLock intentWorker_connectedLock:
+        # signal the threads that the connection is ready
+        broadcast connectedCond
+
+    bot.connected = true
+
+    # wait for the handshake
+    try:
+      while true:
+        let whisky_msg = bot.gs_ws.receiveMessage()
+        if whisky_msg.isSome:
+          let msg = whisky_msg.get
+          case msg.kind:
+          of TextMessage:
+            handleMessage(bot, msg.data)
+          of Ping:
+            echo "[startBot] received a ping"
+            discard
+          else:
+            echo "[startBot] received an unhandled message: ", msg.kind
+            discard
+        else:
+          echo "[startBot] message is 'not Some'"
+          discard
+    except CatchableError:
+      echo "[startBot] ERROR: ", getCurrentExceptionMsg()
+      return
+    echo "[startBot] QUIT"
     
     # Waiting for the bot thread to finish
-    wait(connectedCond, connectedLock)
-    wait(runningCond, runningLock)
-    joinThread botRunner
+    wait connectedCond, botWorker_connectedLock
+    wait connectedCond, intentWorker_connectedLock
+    wait runningCond, runningLock
+    wait intentCond, intentLock
+    joinThreads botRunner, intentRunner
 
-  deinitLock connectedLock
+  deinitLock botWorker_connectedLock
+  deinitLock intentWorker_connectedLock
   deinitCond connectedCond
   deinitLock runningLock
   deinitCond runningCond
+  deinitLock intentLock
+  deinitCond intentCond
     
   echo "[startBot]connection ended and bot thread finished. Bye!"

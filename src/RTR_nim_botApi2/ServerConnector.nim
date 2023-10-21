@@ -1,17 +1,31 @@
 import std/[strutils, locks]
-import Bot, Message
-import asyncdispatch, ws, jsony, json
+import Bot, Schema
+import jsony, json, whisky
 
 # globals
 var
-  connectedLock*:Lock
+  botWorker_connectedLock*:Lock
+  intentWorker_connectedLock*:Lock
   connectedCond*:Cond
   runningLock*:Lock
   runningCond*:Cond
+  intentLock*:Lock
+  intentCond*:Cond
 
-proc handleMessage(bot:Bot, json_message:string, gs_ws:WebSocket) {.async.} =
+# proc intentSenderWorker*(intentSenderObj:IntentSenderObj) {.thread.} =
+#   while true:
+#     echo "[intentSender] waiting for intent signal"
+#     # wait for the intent
+#     wait intentCond, intentLock
+
+#     echo "[intentSender] intent signal received, sending intent"
+#     # send the intent
+#     waitFor intentSenderObj.gs_ws.send(intentSenderObj.bot.intent.toJson)
+#     echo "[intentSender] intent sent for turn ", intentSenderObj.bot.turnNumber
+
+proc handleMessage*(bot:Bot, json_message:string) =
   # Convert the json to a Message object
-  let message = json2message json_message
+  let message = json2schema json_message
 
   bot.lastMessageType = message.`type`
 
@@ -20,7 +34,7 @@ proc handleMessage(bot:Bot, json_message:string, gs_ws:WebSocket) {.async.} =
   of serverHandshake:
     let server_handshake = (ServerHandshake)message
     let bot_handshake = BotHandshake(`type`:Type.botHandshake, sessionId:server_handshake.sessionId, name:bot.name, version:bot.version, authors:bot.authors, secret:bot.secret, initialPosition:bot.initialPosition)
-    await gs_ws.send(bot_handshake.toJson)
+    bot.gs_ws.send(bot_handshake.toJson)
 
   of gameStartedEventForBot:
     let game_started_event_for_bot = (GameStartedEventForBot)message
@@ -33,7 +47,7 @@ proc handleMessage(bot:Bot, json_message:string, gs_ws:WebSocket) {.async.} =
     bot.onGameStarted(game_started_event_for_bot)
     
     # send bot ready
-    await gs_ws.send(BotReady(`type`:Type.botReady).toJson)
+    bot.gs_ws.send(BotReady(`type`:Type.botReady).toJson)
 
   of tickEventForBot:
     let tick_event_for_bot = (TickEventForBot)message
@@ -44,8 +58,6 @@ proc handleMessage(bot:Bot, json_message:string, gs_ws:WebSocket) {.async.} =
 
     # activating the bot method
     bot.onTick(tick_event_for_bot)
-
-    withLock(runningLock): signal(runningCond)
 
     # for every event inside this tick call the relative event for the bot
     for event in tick_event_for_bot.events:
@@ -106,55 +118,12 @@ proc handleMessage(bot:Bot, json_message:string, gs_ws:WebSocket) {.async.} =
     # Start the bot
     start bot
 
+    # notify the bot that the round is started
+    withLock runningLock: signal runningCond
+
     let round_started_event = (RoundStartedEvent)message
 
     # activating the bot method
     bot.onRoundStarted(round_started_event)
 
   else: echo "NOT HANDLED MESSAGE: ",json_message
-
-proc connect*(bot:Bot):Future[WebSocket] {.async.} =
-  echo "[connect] connecting to ", bot.serverConnectionURL
-  try: # try a websocket connection to server
-    var gs_ws = await newWebSocket(bot.serverConnectionURL)
-    echo "[connect] WebSocket connected"
-
-    if(gs_ws.readyState == Open):
-      echo "[connect] connection is Open"
-      # notify bot that the connection is open
-      withLock(connectedLock): signal(connectedCond)
-      bot.connected = true
-      onConnect bot
-    
-    return gs_ws
-  except CatchableError:
-    echo "[connect] CatchableError: ", getCurrentExceptionMsg()
-    bot.connected = false
-    bot.onConnectionError(getCurrentExceptionMsg())
-  return nil
-
-proc listen*(bot:Bot, gs_ws:WebSocket) {.async.} =
-  echo "[listen] start listening for messages from ", bot.serverConnectionURL
-  try: # try a websocket connection to server
-    # while the connection is open...
-    while(gs_ws.readyState == Open):
-      # listen for a message
-      let json_message = await gs_ws.receiveStrPacket()
-
-      # GATE:asas the message is received we if is empty or similar useless message
-      if json_message.isEmptyOrWhitespace(): continue
-
-      # send the message to an handler 
-      asyncCheck handleMessage(bot, json_message, gs_ws)
-
-    bot.connected = false
-
-  except CatchableError:
-    echo "[listen] CatchableError: ", getCurrentExceptionMsg()
-    case bot.lastMessageType:
-    of serverHandshake:
-      echo "[listen] Server Handshake failed, probably the secret is wrong"
-    else:
-      echo "[listen] error, last message that probably caused the error: ", $bot.lastMessageType
-    bot.connected = false
-    bot.onConnectionError(getCurrentExceptionMsg())

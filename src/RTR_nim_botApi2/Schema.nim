@@ -38,13 +38,13 @@ type
     tpsChangedEvent = "TpsChangedEvent"
     wonRoundEvent = "WonRoundEvent"
   
-  Message* = ref object of RootObj
+  Schema* = ref object of RootObj
     `type`*: Type
 
   InitialPosition* = ref object of RootObj
     x*,y*,angle*: float #The x,y and angle coordinate. When it is not set, a random value will be used
 
-  Event* = ref object of Message
+  Event* = ref object of Schema
     turnNumber*: int #The turn number in current round when event occurred
 
   BotAddress* = ref object of RootObj
@@ -54,7 +54,7 @@ type
   BotDeathEvent* = ref object of Event
     victimId*: int #ID of the bot that has died
 
-  BotHandshake* = ref object of Message
+  BotHandshake* = ref object of Schema
     sessionId*: string #Unique session id that must match the session id received from the server handshake
     name*: string #Name of bot, e.g. Killer Bee
     version*: string #Bot version, e.g. 1.0
@@ -83,7 +83,7 @@ type
     host*: string #Host name or IP address
     port*: int #Port number
 
-  BotIntent* = ref object of Message
+  BotIntent* = ref object of Schema
     turnRate*: float #Turn rate of the body in degrees per turn (can be positive and negative)
     gunTurnRate*: float #Turn rate of the gun in degrees per turn (can be positive and negative)
     radarTurnRate*: float #Turn rate of the radar in degrees per turn (can be positive and negative)
@@ -105,10 +105,10 @@ type
     stdErr*: string #New text received from standard error (stderr)
     teamMessages*: seq[TeamMessage] #Messages to send to one or more individual teammates or broadcast to the entire team
 
-  BotListUpdate* = ref object of Message
+  BotListUpdate* = ref object of Schema
     bots*: seq[BotInfo] #List of bots
 
-  BotReady* = ref object of Message
+  BotReady* = ref object of Schema
 
   BotResultsForBot* = ref object of RootObj
     rank*: int #Rank/placement of the bot, where 1 is 1st place, 4 is 4th place etc.
@@ -180,7 +180,7 @@ type
     direction*: float #Direction in degrees
     color*: string #Color of the bullet
 
-  ControllerHandshake* = ref object of Message
+  ControllerHandshake* = ref object of Schema
     sessionId*: string #Unique session id that must match the session id received from the server handshake.
     name*: string #Name of the controller
     version*: string #Version of the controller
@@ -203,27 +203,27 @@ type
     isGunCoolingRateLocked*: bool #Flag specifying if the gun cooling rate is fixed for this game type
     maxInactivityTurns*: int #Maximum number of inactive turns allowed, where a bot does not take
     isMaxInactivityTurnsLocked*: bool #Flag specifying if the inactive turns is fixed for this game type
-    turnTimeout*: int #Turn timeout in microseconds (1 / 1,000,000 second) for sending intent after having received 'tick' message
+    turnTimeout*: int #Turn timeout in microseconds (1 / 1,000,000 second) for sending intent after having received 'tick' Message
     isTurnTimeoutLocked*: bool #Flag specifying if the turn timeout is fixed for this game type
     readyTimeout*: int #Time limit in microseconds (1 / 1,000,000 second) for sending ready
     isReadyTimeoutLocked*: bool #Flag specifying if the ready timeout is fixed for this game type
     defaultTurnsPerSecond*: int #Default number of turns to show per second for an observer/UI
 
-  GameAbortedEvent* = ref object of Message
+  GameAbortedEvent* = ref object of Schema
 
-  GameEndedEventForBot* = ref object of Message
+  GameEndedEventForBot* = ref object of Schema
     numberOfRounds*: int #Number of rounds played
     results*: BotResultsForObserver #Results of the battle for all bots
 
-  GameEndedEventForObserver* = ref object of Message
+  GameEndedEventForObserver* = ref object of Schema
     numberOfRounds*: int #Number of rounds played
     results*: seq[BotResultsForObserver] #Results of the battle for all bots
 
-  GameStartedEventForBot* = ref object of Message
+  GameStartedEventForBot* = ref object of Schema
     myId*: int #My ID is an unique identifier for this bot
     gameSetup*: GameSetup #Game setup
 
-  GameStartedEventForObserver* = ref object of Message
+  GameStartedEventForObserver* = ref object of Schema
     gameSetup*: GameSetup #Game setup
     participants*:seq[Participant]
 
@@ -246,15 +246,15 @@ type
     programmingLang*: string #Programming language the bot is written in, e.g. "Java", "C#" or "C++"
     initialPosition*: InitialPosition #Initial position of the bot
 
-  RoundStartedEvent* = ref object of Message
+  RoundStartedEvent* = ref object of Schema
     roundNumber*: int #The current round number in the battle when event occurred
 
-  RoundEndedEventForBot* = ref object of Message
+  RoundEndedEventForBot* = ref object of Schema
     roundNumber*: int #The current round number in the battle when event occurred
     turnNumber*: int #The current turn number in the round when event occurred
     results*: BotResultsForBot #The accumulated bot results by the end of the round.
 
-  RoundEndedEventForObserver* = ref object of Message
+  RoundEndedEventForObserver* = ref object of Schema
     roundNumber*: int #The current round number in the battle when event occurred
     turnNumber*: int #The current turn number in the round when event occurred
     results*: seq[BotResultsForObserver] #The accumulated bot results by the end of the round.
@@ -268,23 +268,23 @@ type
     direction*: float #Direction in degrees of the scanned bot
     speed*: float #Speed measured in units per turn of the scanned bot
 
-  ServerHandshake* = ref object of Message
+  ServerHandshake* = ref object of Schema
     sessionId*: string #Unique session id used for identifying the caller client (bot, controller, observer) connection.
     name*: string #Name of server, e.g. John Doe's RoboRumble Server
     variant*: string #Game variant, e.g. 'Tank Royale' for Robocode Tank Royale
     version*: string #Game version, e.g. '1.0.0' using Semantic Versioning (https://semver.org/)
     gameTypes*: seq[string] #Game types running at this server, e.g. "melee" and "1v1"
 
-  StartGame* = ref object of Message
+  StartGame* = ref object of Schema
     gameSetup*: GameSetup #Game setup
     botAddresses*: seq[BotAddress] #List of bot addresses
 
   SkippedTurnEvent* = ref object of Event
 
-  StopGame* = ref object of Message
+  StopGame* = ref object of Schema
 
-  TeamMessage* = ref object of Message
-    receiverId*: int #The id of the receiver teammate. If omitted, the message is broadcast to all teammates
+  TeamMessage* = ref object of Schema
+    receiverId*: int #The id of the receiver teammate. If omitted, the Message is broadcast to all teammates
     description*: string #Message sent between teammates
 
   TickEventForBot* = ref object of Event
@@ -302,8 +302,11 @@ type
 
   WonRoundEvent* = ref object of Event
 
-proc json2message*(json_message:string):Message =
-  let `type` = json_message.fromJson(Message).`type`
+proc schema2json*(schema:Schema):string =
+  result = schema.toJson
+
+proc json2schema*(json_message:string):Schema =
+  let `type` = json_message.fromJson(Schema).`type`
   case `type`:
   of Type.botHandshake:
     result = json_message.fromJson(BotHandshake)
