@@ -11,7 +11,8 @@ binDir        = "bin"
 # Dependencies
 requires "nim >= 2.0.0"
 requires "jsony >= 0.1.0"
-requires "whisky >= 0.1.3"
+requires "ws >= 0.5.0"
+requires "shared >= 0.1.0"
 
 # Robocode Tank Royale Version/Tag
 let RTR_Version = "v0.19.3"

@@ -1,5 +1,5 @@
 import std/[os, locks, strutils]
-import whisky, jsony, json
+import ws, jsony, json, asyncdispatch
 import RTR_nim_botApi2/[Schema, Bot]
 
 export Schema, Bot
@@ -11,21 +11,23 @@ var
   connectedCond:Cond
   runningLock:Lock
   runningCond:Cond
-  intentLock:Lock
-  intentCond:Cond
+  messagesSeqLock:Lock
 
 proc handleMessage(bot:Bot, json_message:string) =
   # Convert the json to a Message object
   let message = json2schema json_message
-
-  bot.lastMessageType = message.`type`
 
   # 'case' switch over type
   case message.`type`:
   of serverHandshake:
     let server_handshake = (ServerHandshake)message
     let bot_handshake = BotHandshake(`type`:Type.botHandshake, sessionId:server_handshake.sessionId, name:bot.name, version:bot.version, authors:bot.authors, secret:bot.secret, initialPosition:bot.initialPosition)
-    bot.gs_ws.send(bot_handshake.toJson)
+    # waitFor bot.gs_ws.send(bot_handshake.toJson)
+    {.locks: [messagesSeqLock].}: bot.messagesToSend.add(bot_handshake.toJson)
+    
+    # signal the threads that the connection is ready
+    bot.connected = true
+    {.locks: [botWorker_connectedLock].}: broadcast connectedCond
 
   of gameStartedEventForBot:
     let game_started_event_for_bot = (GameStartedEventForBot)message
@@ -38,7 +40,8 @@ proc handleMessage(bot:Bot, json_message:string) =
     bot.onGameStarted(game_started_event_for_bot)
     
     # send bot ready
-    bot.gs_ws.send(BotReady(`type`:Type.botReady).toJson)
+    # waitFor bot.gs_ws.send(BotReady(`type`:Type.botReady).toJson)
+    {.locks: [messagesSeqLock].}: bot.messagesToSend.add(BotReady(`type`:Type.botReady).toJson)
 
   of tickEventForBot:
     let tick_event_for_bot = (TickEventForBot)message
@@ -110,7 +113,7 @@ proc handleMessage(bot:Bot, json_message:string) =
     start bot
 
     # notify the bot that the round is started
-    withLock runningLock: signal runningCond
+    {.locks: [runningLock].}: broadcast runningCond
 
     let round_started_event = (RoundStartedEvent)message
 
@@ -141,8 +144,9 @@ proc go*(bot:Bot) =
   bot.intent = BotIntent(`type`: Type.botIntent)
 
   # signal to send the intent to the game server
-  broadcast intentCond
-  return
+  # {.locks: [intentLock].}: broadcast intentCond
+  # waitFor bot.gs_ws.send(schema2json bot.intent)
+  {.locks: [messagesSeqLock].}: bot.messagesToSend.add(bot.intent.toJson)
 
 proc botWorker(bot:Bot) {.thread.} =
   bot.botReady = true
@@ -171,20 +175,63 @@ proc botWorker(bot:Bot) {.thread.} =
     echo "[botWorker] automatic GO ended"
   echo "[botWorker] QUIT"
 
-proc intentWorker(bot:Bot) {.thread.} =
-  bot.talkerReady = true
-  echo "[intentWorker] READY!"
+proc conectionHandler(bot:Bot) {.async.} =
+  try:
+    var ws = await newWebSocket(bot.serverConnectionURL)
+    echo "[conectionHandler] connected..."
 
-  echo "[intentWorker] waiting for connection"
-  # wait for the connection
-  wait connectedCond, intentWorker_connectedLock
+    proc writer() {.async.} =
+      ## Loops while socket is open, looking for messages to write
+      while ws.readyState == Open:
+        # if there are chat message we have not sent yet
+        # send them
+        {.locks: [messagesSeqLock].}:
+          while bot.messagesToSend.len > 0:
+            let message = bot.messagesToSend.pop()
+            await ws.send(message)
 
-  echo "[intentWorker] connection received, start talking"
-  while true:
-    wait intentCond, intentLock
-    bot.gs_ws.send(schema2json bot.intent)
+        # keep the async stuff happy we need to sleep some times
+        await sleepAsync(1)
 
-  echo "[intentWorker] QUIT"
+    proc reader() {.async.} =
+      # Loops while socket is open, looking for messages to read
+      while ws.readyState == Open:
+        # this blocks
+        var packet = await ws.receiveStrPacket()
+
+        if packet.isEmptyOrWhitespace(): continue
+
+        handleMessage(bot, packet)
+
+    # start a async fiber thingy
+    asyncCheck writer()
+    await reader()
+
+  except WebSocketClosedError:
+    echo "Socket closed. "
+  except WebSocketProtocolMismatchError:
+    echo "Socket client tried to use an unknown protocol: ",
+        getCurrentExceptionMsg()
+  except WebSocketError:
+    echo "Unexpected socket error: ", getCurrentExceptionMsg()
+
+# proc conectionHandler(bot:Bot) {.async.} =
+#   try:
+#     bot.gs_ws = await newWebSocket(bot.serverConnectionURL)
+
+#     echo "[conectionHandler] starting the connection handler loop"
+#     while bot.gs_ws.readyState == Open:
+#       echo "[conectionHandler] waiting for message"
+#       let json_message = await bot.gs_ws.receiveStrPacket()
+#       echo "[conectionHandler] message received"  
+      
+#       # GATE:as the message is received we if is empty or similar useless message
+#       if json_message.isEmptyOrWhitespace(): continue
+
+#       asyncCheck handleMessage(bot, json_message)
+#       await sleepAsync(1)
+#   except CatchableError:
+#     echo "[conectionHandler] WebSocketError: ", getCurrentExceptionMsg()
 
 proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialPosition(x:0,y:0,angle:0)) =
   ## **Start the bot**
@@ -208,8 +255,7 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
   initCond connectedCond
   initLock runningLock
   initCond runningCond
-  initLock intentLock
-  initCond intentCond
+  initLock messagesSeqLock
 
   # connect to the Game Server
   if(connect):
@@ -222,69 +268,26 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
     # runners for the 3 main threads
     var
       botRunner: Thread[bot.type]
-      intentRunner: Thread[bot.type]
 
     # create the threads
-    withLock botWorker_connectedLock:
-      withLock runningLock:
-        createThread botRunner, botWorker, bot
-
-    withLock intentWorker_connectedLock:
-      withLock intentLock:
-        createThread intentRunner, intentWorker, bot
-
-    # connect to the server
-    bot.gs_ws = newWebSocket(bot.serverConnectionURL)
+    {.locks: [botWorker_connectedLock, runningLock].}: createThread botRunner, botWorker, bot
 
     # wait for the threads to be ready
     echo "[startBot] waiting for bot and intent threads to be ready"
-    while not bot.botReady or not bot.talkerReady: sleep(100)
-    echo "[startBot] bot and intent threads are ready: ", bot.botReady, bot.talkerReady
+    while not bot.botReady and not bot.intentReady: sleep(100)
+    echo "[startBot] bot threads are ready: ", bot.botReady, " ", bot.intentReady
 
-    withLock botWorker_connectedLock:
-      withLock intentWorker_connectedLock:
-        # signal the threads that the connection is ready
-        broadcast connectedCond
+    # connect to the server
+    waitFor conectionHandler bot
 
-    bot.connected = true
-
-    # wait for the handshake
-    var whisky_msg:Option[whisky.Message]
-    try:
-      while true:
-        whisky_msg = bot.gs_ws.receiveMessage()
-        if whisky_msg.isSome:
-          let msg = whisky_msg.get
-          case msg.kind:
-          of TextMessage:
-            handleMessage(bot, msg.data)
-          of Ping:
-            echo "[startBot] received a ping"
-            discard
-          else:
-            echo "[startBot] received an unhandled message: ", msg.kind
-            discard
-        else:
-          echo "[startBot] message is 'not Some'"
-          discard
-    except CatchableError:
-      echo "[startBot] ERROR: ", getCurrentExceptionMsg()
-      discard
-    echo "[startBot] QUIT"
-    
     # Waiting for the bot thread to finish
-    wait connectedCond, botWorker_connectedLock
-    wait connectedCond, intentWorker_connectedLock
-    wait runningCond, runningLock
-    wait intentCond, intentLock
-    joinThreads botRunner, intentRunner
+    joinThreads botRunner
 
   deinitLock botWorker_connectedLock
   deinitLock intentWorker_connectedLock
   deinitCond connectedCond
   deinitLock runningLock
   deinitCond runningCond
-  deinitLock intentLock
-  deinitCond intentCond
+  deinitLock messagesSeqLock
     
   echo "[startBot]connection ended and bot thread finished. Bye!"

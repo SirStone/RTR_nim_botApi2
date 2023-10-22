@@ -1,5 +1,5 @@
-import std/[os]
-import jsony, whisky
+import std/[os, locks]
+import jsony
 import Schema
 
 type
@@ -30,11 +30,10 @@ type
     # usage during the games
     botReady*:bool = false
     listenerReady*:bool = false
-    talkerReady*:bool = false
+    intentReady*:bool = false
     running*:bool = false
     connected*:bool = false
-    lastMessageType*:Type
-    gs_ws*:WebSocket
+    messagesToSend* = newSeq[string]()
 
   Bot* = ref object of BluePrint
 
@@ -53,20 +52,20 @@ proc newBot*(json_file: string): Bot =
 
 # the following section contains all the methods that are supposed to be overrided by the bot creator
 method run*(bot:BluePrint) {.base gcsafe.} = discard # this method is called in a secondary thread
-method onGameAborted*(bot:BluePrint, gameAbortedEvent:GameAbortedEvent) {.base.} = discard
-method onGameEnded*(bot:BluePrint, gameEndedEventForBot:GameEndedEventForBot) {.base.} = discard
-method onGameStarted*(bot:BluePrint, gameStartedEventForBot:GameStartedEventForBot) {.base.} = discard
-method onHitByBullet*(bot:BluePrint, hitByBulletEvent:HitByBulletEvent) {.base.} = discard
-method onHitBot*(bot:BluePrint, botHitBotEvent:BotHitBotEvent) {.base.} = discard
-method onHitWall*(bot:BluePrint, botHitWallEvent:BotHitWallEvent) {.base.} = discard
-method onRoundEnded*(bot:BluePrint, roundEndedEventForBot:RoundEndedEventForBot) {.base.} = discard
-method onRoundStarted*(bot:BluePrint, roundStartedEvent:RoundStartedEvent) {.base.} = discard
-method onSkippedTurn*(bot:BluePrint, skippedTurnEvent:SkippedTurnEvent) {.base.} = discard
-method onScannedBot*(bot:BluePrint, scannedBotEvent:ScannedBotEvent) {.base.} = discard
-method onTick*(bot:BluePrint, tickEventForBot:TickEventForBot) {.base.} = discard
-method onDeath*(bot:BluePrint, botDeathEvent:BotDeathEvent) {.base.} =  discard
-method onConnect*(bot:BluePrint) {.base.} = discard
-method onConnectionError*(bot:BluePrint, error:string) {.base.} = discard
+method onGameAborted*(bot:BluePrint, gameAbortedEvent:GameAbortedEvent) {.base gcsafe.} = discard
+method onGameEnded*(bot:BluePrint, gameEndedEventForBot:GameEndedEventForBot) {.base gcsafe.} = discard
+method onGameStarted*(bot:BluePrint, gameStartedEventForBot:GameStartedEventForBot) {.base gcsafe.} = discard
+method onHitByBullet*(bot:BluePrint, hitByBulletEvent:HitByBulletEvent) {.base gcsafe.} = discard
+method onHitBot*(bot:BluePrint, botHitBotEvent:BotHitBotEvent) {.base gcsafe.} = discard
+method onHitWall*(bot:BluePrint, botHitWallEvent:BotHitWallEvent) {.base gcsafe.} = discard
+method onRoundEnded*(bot:BluePrint, roundEndedEventForBot:RoundEndedEventForBot) {.base gcsafe.} = discard
+method onRoundStarted*(bot:BluePrint, roundStartedEvent:RoundStartedEvent) {.base gcsafe.} = discard
+method onSkippedTurn*(bot:BluePrint, skippedTurnEvent:SkippedTurnEvent) {.base gcsafe.} = discard
+method onScannedBot*(bot:BluePrint, scannedBotEvent:ScannedBotEvent) {.base gcsafe.} = discard
+method onTick*(bot:BluePrint, tickEventForBot:TickEventForBot) {.base gcsafe.} = discard
+method onDeath*(bot:BluePrint, botDeathEvent:BotDeathEvent) {.base gcsafe.} =  discard
+method onConnect*(bot:BluePrint) {.base gcsafe.} = discard
+method onConnectionError*(bot:BluePrint, error:string) {.base gcsafe.} = discard
 
 proc isRunning*(bot:BluePrint):bool = bot.running
 

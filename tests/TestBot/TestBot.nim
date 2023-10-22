@@ -27,6 +27,7 @@ method onSkippedTurn(bot:Bot, skippedTurnEvent:SkippedTurnEvent) =
   skipped_turns += 1
   if skipped_turns mod 100 == 0:
     echo "[TestBot]Skipped turns: ", skipped_turns
+  stdout.write "*" # print a star for each skipped turn
 
 method onHitByBullet(bot:Bot, hitByBulletEvent:HitByBulletEvent) =
   echo "[TestBot]Hit by bullet, OUCH!"
