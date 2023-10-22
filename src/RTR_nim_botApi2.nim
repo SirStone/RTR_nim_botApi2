@@ -1,23 +1,138 @@
-import std/[os, locks]
-import whisky
-import RTR_nim_botApi2/[Schema, Bot, ServerConnector]
+import std/[os, locks, strutils]
+import whisky, jsony, json
+import RTR_nim_botApi2/[Schema, Bot]
 
 export Schema, Bot
 
-template `logout`* (bot:Bot, x:string) =
-  stdout.writeLine(x)
-  # stdout.flushFile
-  bot.intent.stdOut &= x & "\n"
+# globals
+var
+  botWorker_connectedLock:Lock
+  intentWorker_connectedLock:Lock
+  connectedCond:Cond
+  runningLock:Lock
+  runningCond:Cond
+  intentLock:Lock
+  intentCond:Cond
 
-template `logerr`* (bot:Bot, x:string) =
-  stderr.writeLine(x)
-  # stderr.flushFile
-  bot.intent.stdErr &= x & "\n"
+proc handleMessage(bot:Bot, json_message:string) =
+  # Convert the json to a Message object
+  let message = json2schema json_message
+
+  bot.lastMessageType = message.`type`
+
+  # 'case' switch over type
+  case message.`type`:
+  of serverHandshake:
+    let server_handshake = (ServerHandshake)message
+    let bot_handshake = BotHandshake(`type`:Type.botHandshake, sessionId:server_handshake.sessionId, name:bot.name, version:bot.version, authors:bot.authors, secret:bot.secret, initialPosition:bot.initialPosition)
+    bot.gs_ws.send(bot_handshake.toJson)
+
+  of gameStartedEventForBot:
+    let game_started_event_for_bot = (GameStartedEventForBot)message
+
+    # store the Game Setup for the bot usage
+    bot.gameSetup = game_started_event_for_bot.gameSetup
+    bot.myId = game_started_event_for_bot.myId
+
+    # activating the bot method
+    bot.onGameStarted(game_started_event_for_bot)
+    
+    # send bot ready
+    bot.gs_ws.send(BotReady(`type`:Type.botReady).toJson)
+
+  of tickEventForBot:
+    let tick_event_for_bot = (TickEventForBot)message
+    bot.botState = tick_event_for_bot.botState
+
+    bot.turnNumber = tick_event_for_bot.turnNumber
+    bot.roundNumber = tick_event_for_bot.roundNumber
+
+    # activating the bot method
+    bot.onTick(tick_event_for_bot)
+
+    # for every event inside this tick call the relative event for the bot
+    for event in tick_event_for_bot.events:
+      case parseEnum[Type](event["type"].getStr()):
+      of Type.botDeathEvent:
+        # if the bot is dead we stop it
+        stop bot
+
+        # Notifiy the bot that it is dead
+        bot.onDeath(fromJson($event, BotDeathEvent))
+      of Type.botHitWallEvent:
+        bot.onHitWall(fromJson($event, BotHitWallEvent))
+      of Type.bulletHitBotEvent:
+        # conversion from BulletHitBotEvent to HitByBulletEvent
+        let hit_by_bullet_event = fromJson($event, HitByBulletEvent)
+        hit_by_bullet_event.`type` = Type.hitByBulletEvent
+        bot.onHitByBullet(hit_by_bullet_event)
+      of Type.botHitBotEvent:
+        bot.onHitBot(fromJson($event, BotHitBotEvent))
+      of Type.scannedBotEvent:
+        bot.onScannedBot(fromJson($event, ScannedBotEvent))        
+      else:
+        echo "NOT HANDLED BOT TICK EVENT: ", event
+
+    
+    # send intent
+  of gameAbortedEvent:
+    stop bot
+
+    let game_aborted_event = (GameAbortedEvent)message
+
+    # activating the bot method
+    bot.onGameAborted(game_aborted_event)
+
+  of gameEndedEventForBot:
+    stop bot
+
+    let game_ended_event_for_bot = (GameEndedEventForBot)message
+
+    # activating the bot method
+    bot.onGameEnded(game_ended_event_for_bot)
+
+  of skippedTurnEvent:
+    let skipped_turn_event = (SkippedTurnEvent)message
+    
+    # activating the bot method
+    bot.onSkippedTurn(skipped_turn_event)
+
+  of roundEndedEventForBot:
+    stop bot
+
+    let round_ended_event_for_bot = json_message.fromJson(RoundEndedEventForBot)
+
+    # activating the bot method
+    bot.onRoundEnded(round_ended_event_for_bot)
+
+  of roundStartedEvent:
+    # Start the bot
+    start bot
+
+    # notify the bot that the round is started
+    withLock runningLock: signal runningCond
+
+    let round_started_event = (RoundStartedEvent)message
+
+    # activating the bot method
+    bot.onRoundStarted(round_started_event)
+
+  else: echo "NOT HANDLED MESSAGE: ",json_message
+
+# template `logout`* (bot:Bot, x:string) =
+#   stdout.writeLine(x)
+#   # stdout.flushFile
+#   bot.intent.stdOut &= x & "\n"
+
+# template `logerr`* (bot:Bot, x:string) =
+#   stderr.writeLine(x)
+#   # stderr.flushFile
+#   bot.intent.stdErr &= x & "\n"
 
 var lastIntent_turn:int = -1
-proc go*(bot:Bot):bool =
+proc go*(bot:Bot) =
   # Sending intent to server if the last turn we sent it is different from the current turn
-  if bot.turnNumber == lastIntent_turn: return false
+  if bot.turnNumber == lastIntent_turn: return
 
   # update the last turn we sent the intent
   lastIntent_turn = bot.turnNumber
@@ -27,7 +142,7 @@ proc go*(bot:Bot):bool =
 
   # signal to send the intent to the game server
   broadcast intentCond
-  return true
+  return
 
 proc botWorker(bot:Bot) {.thread.} =
   bot.botReady = true
@@ -43,20 +158,20 @@ proc botWorker(bot:Bot) {.thread.} =
     wait runningCond, runningLock
 
     # Second run the bot 'run()' method, the one scripted by the bot creator
-    # this could be going in loop until the bot is dead or could finish up quckly or could be that is not implemented at all
+    # this could be going in loop until the bot is dead or could finish up quickly or could be that is not implemented at all
     run bot
 
     echo "[botWorker] automatic GO started"
     # Third, when the bot creator's 'run()' exits, if the bot is still runnning, we send the intent automatically
     while isRunning(bot):
-      discard go bot
+      go bot
     echo "[botWorker] isRunning(bot): ", isRunning(bot)
     echo "[botWorker] bot.connected: ", bot.connected
 
     echo "[botWorker] automatic GO ended"
   echo "[botWorker] QUIT"
 
-proc intentWorker(bot:Bot) =
+proc intentWorker(bot:Bot) {.thread.} =
   bot.talkerReady = true
   echo "[intentWorker] READY!"
 
@@ -134,9 +249,10 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
     bot.connected = true
 
     # wait for the handshake
+    var whisky_msg:Option[whisky.Message]
     try:
       while true:
-        let whisky_msg = bot.gs_ws.receiveMessage()
+        whisky_msg = bot.gs_ws.receiveMessage()
         if whisky_msg.isSome:
           let msg = whisky_msg.get
           case msg.kind:
@@ -153,7 +269,7 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
           discard
     except CatchableError:
       echo "[startBot] ERROR: ", getCurrentExceptionMsg()
-      return
+      discard
     echo "[startBot] QUIT"
     
     # Waiting for the bot thread to finish

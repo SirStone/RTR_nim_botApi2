@@ -1,6 +1,6 @@
-import Schema
 import std/[os]
 import jsony, whisky
+import Schema
 
 type
   BluePrint = ref object of RootObj
@@ -44,7 +44,7 @@ proc newBot*(json_file: string): Bot =
     # build the bot from the json
     let path:string = joinPath(getAppDir(),json_file)
     let content:string = readFile(path)
-    let bot:Bot = content.fromJson(Bot)
+    let bot:Bot = fromJson(content, Bot)
     # maybe code here ...
     return bot
   except IOError as e:

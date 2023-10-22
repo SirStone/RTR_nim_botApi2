@@ -10,10 +10,10 @@ method run(bot:Bot) =
   var current_go = 1
   echo "[TestBot] " & bot.name & " run started, running for"
   while bot.isRunning and current_go <= total_gos:
-    if go bot:
-      echo "[TestBot] running: ", $isRunning(bot), " turn number: ", $bot.turnNumber, " go: ", $current_go, " of ", $total_gos
-      current_go += 1
-    sleep 10
+    go bot
+    echo "[TestBot] running: ", $isRunning(bot), " turn number: ", $bot.turnNumber, " go: ", $current_go, " of ", $total_gos
+    current_go += 1
+    sleep 30
   echo "[TestBot] " & bot.name & " run stopped"
 
 method onConnect(bot:Bot) =
@@ -22,8 +22,14 @@ method onConnect(bot:Bot) =
 method onConnectionError(bot:Bot, error:string) =
   echo "[TestBot]Connection error:" & error
 
+var skipped_turns = 0
 method onSkippedTurn(bot:Bot, skippedTurnEvent:SkippedTurnEvent) =
-  echo "[TestBot]Skipped turn: " & $skippedTurnEvent.turnNumber
+  skipped_turns += 1
+  if skipped_turns mod 100 == 0:
+    echo "[TestBot]Skipped turns: ", skipped_turns
 
 method onHitByBullet(bot:Bot, hitByBulletEvent:HitByBulletEvent) =
   echo "[TestBot]Hit by bullet, OUCH!"
+
+method onDeath(bot:Bot, botDeathEvent:BotDeathEvent) =
+  echo "[TestBot]I'm dead, I'm dead, I'm dead! turn: " & $botDeathEvent.turnNumber
