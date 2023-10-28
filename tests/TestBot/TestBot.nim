@@ -6,11 +6,11 @@ startBot Bot.newBot("TestBot.json") # start the bot
 import std/[os]
 
 method run(bot:Bot) =
-  let total_gos = 50
+  let total_gos = 100
   var current_go = 1
   echo "[TestBot] " & bot.name & " run started, running for"
-  while bot.isRunning and current_go <= total_gos:
-    go bot
+  while isRunning(bot) and current_go <= total_gos:
+    go bot # send the intent
     echo "[TestBot] running: ", $isRunning(bot), " turn number: ", $bot.turnNumber, " go: ", $current_go, " of ", $total_gos
     current_go += 1
     sleep 30

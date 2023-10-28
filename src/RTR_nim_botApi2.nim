@@ -6,12 +6,8 @@ export Schema, Bot
 
 # globals
 var
-  botWorker_connectedLock:Lock
-  intentWorker_connectedLock:Lock
-  connectedCond:Cond
-  runningLock:Lock
-  runningCond:Cond
   messagesSeqLock:Lock
+  botWorkerChan:Channel[string]
 
 proc handleMessage(bot:Bot, json_message:string) =
   # Convert the json to a Message object
@@ -27,7 +23,8 @@ proc handleMessage(bot:Bot, json_message:string) =
     
     # signal the threads that the connection is ready
     bot.connected = true
-    {.locks: [botWorker_connectedLock].}: broadcast connectedCond
+    # {.locks: [botWorker_connectedLock].}: broadcast connectedCond
+    botWorkerChan.send("connected")
 
   of gameStartedEventForBot:
     let game_started_event_for_bot = (GameStartedEventForBot)message
@@ -113,7 +110,8 @@ proc handleMessage(bot:Bot, json_message:string) =
     start bot
 
     # notify the bot that the round is started
-    {.locks: [runningLock].}: broadcast runningCond
+    # {.locks: [runningLock].}: broadcast runningCond
+    botWorkerChan.send("running")
 
     let round_started_event = (RoundStartedEvent)message
 
@@ -121,16 +119,6 @@ proc handleMessage(bot:Bot, json_message:string) =
     bot.onRoundStarted(round_started_event)
 
   else: echo "NOT HANDLED MESSAGE: ",json_message
-
-# template `logout`* (bot:Bot, x:string) =
-#   stdout.writeLine(x)
-#   # stdout.flushFile
-#   bot.intent.stdOut &= x & "\n"
-
-# template `logerr`* (bot:Bot, x:string) =
-#   stderr.writeLine(x)
-#   # stderr.flushFile
-#   bot.intent.stdErr &= x & "\n"
 
 var lastIntent_turn:int = -1
 proc go*(bot:Bot) =
@@ -144,8 +132,6 @@ proc go*(bot:Bot) =
   bot.intent = BotIntent(`type`: Type.botIntent)
 
   # signal to send the intent to the game server
-  # {.locks: [intentLock].}: broadcast intentCond
-  # waitFor bot.gs_ws.send(schema2json bot.intent)
   {.locks: [messagesSeqLock].}: bot.messagesToSend.add(bot.intent.toJson)
 
 proc botWorker(bot:Bot) {.thread.} =
@@ -154,26 +140,37 @@ proc botWorker(bot:Bot) {.thread.} =
 
   # While the bot is connected to the server the bot thread should live
   echo "[botWorker] waiting for connection"
-  wait connectedCond, botWorker_connectedLock
+  var msg = botWorkerChan.recv()
 
-  while bot.connected:
-    echo "[botWorker] waiting for running"
-    # First is waiting doing nothing for the bot to be in running state
-    wait runningCond, runningLock
+  case msg:
+  of "QUIT":
+    echo "[botWorker] QUIT"
+    return
+  else:
+    echo "[botWorker] connection aknowledged"
 
-    # Second run the bot 'run()' method, the one scripted by the bot creator
-    # this could be going in loop until the bot is dead or could finish up quickly or could be that is not implemented at all
-    run bot
+    while bot.connected:
+      echo "[botWorker] waiting for running"
+      # First is waiting doing nothing for the bot to be in running state
+      msg = botWorkerChan.recv()
 
-    echo "[botWorker] automatic GO started"
-    # Third, when the bot creator's 'run()' exits, if the bot is still runnning, we send the intent automatically
-    while isRunning(bot):
-      go bot
-    echo "[botWorker] isRunning(bot): ", isRunning(bot)
-    echo "[botWorker] bot.connected: ", bot.connected
+      case msg:
+      of "QUIT":
+        echo "[botWorker] QUIT"
+        return
+      else:
+        echo "[botWorker] running the custom bot run() method"
 
-    echo "[botWorker] automatic GO ended"
-  echo "[botWorker] QUIT"
+        # Second run the bot 'run()' method, the one scripted by the bot creator
+        # this could be going in loop until the bot is dead or could finish up quickly or could be that is not implemented at all
+        run bot
+
+        echo "[botWorker] automatic GO started"
+        # Third, when the bot creator's 'run()' exits, if the bot is still runnning, we send the intent automatically
+        while isRunning(bot):
+          go bot
+
+        echo "[botWorker] automatic GO ended"
 
 proc conectionHandler(bot:Bot) {.async.} =
   try:
@@ -209,29 +206,13 @@ proc conectionHandler(bot:Bot) {.async.} =
 
   except WebSocketClosedError:
     echo "Socket closed. "
+    botWorkerChan.send("QUIT")
   except WebSocketProtocolMismatchError:
-    echo "Socket client tried to use an unknown protocol: ",
-        getCurrentExceptionMsg()
+    echo "Socket client tried to use an unknown protocol: ", getCurrentExceptionMsg()
+    botWorkerChan.send("QUIT")
   except WebSocketError:
     echo "Unexpected socket error: ", getCurrentExceptionMsg()
-
-# proc conectionHandler(bot:Bot) {.async.} =
-#   try:
-#     bot.gs_ws = await newWebSocket(bot.serverConnectionURL)
-
-#     echo "[conectionHandler] starting the connection handler loop"
-#     while bot.gs_ws.readyState == Open:
-#       echo "[conectionHandler] waiting for message"
-#       let json_message = await bot.gs_ws.receiveStrPacket()
-#       echo "[conectionHandler] message received"  
-      
-#       # GATE:as the message is received we if is empty or similar useless message
-#       if json_message.isEmptyOrWhitespace(): continue
-
-#       asyncCheck handleMessage(bot, json_message)
-#       await sleepAsync(1)
-#   except CatchableError:
-#     echo "[conectionHandler] WebSocketError: ", getCurrentExceptionMsg()
+    botWorkerChan.send("QUIT")
 
 proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialPosition(x:0,y:0,angle:0)) =
   ## **Start the bot**
@@ -250,12 +231,8 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
   bot.initialPosition = position
 
   # init the locks and conditions
-  initLock botWorker_connectedLock
-  initLock intentWorker_connectedLock
-  initCond connectedCond
-  initLock runningLock
-  initCond runningCond
   initLock messagesSeqLock
+  botWorkerChan.open()
 
   # connect to the Game Server
   if(connect):
@@ -270,12 +247,12 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
       botRunner: Thread[bot.type]
 
     # create the threads
-    {.locks: [botWorker_connectedLock, runningLock].}: createThread botRunner, botWorker, bot
+    createThread botRunner, botWorker, bot
 
     # wait for the threads to be ready
     echo "[startBot] waiting for bot and intent threads to be ready"
-    while not bot.botReady and not bot.intentReady: sleep(100)
-    echo "[startBot] bot threads are ready: ", bot.botReady, " ", bot.intentReady
+    while not bot.botReady: sleep(100)
+    echo "[startBot] bot threads are ready: ", bot.botReady
 
     # connect to the server
     waitFor conectionHandler bot
@@ -283,11 +260,6 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
     # Waiting for the bot thread to finish
     joinThreads botRunner
 
-  deinitLock botWorker_connectedLock
-  deinitLock intentWorker_connectedLock
-  deinitCond connectedCond
-  deinitLock runningLock
-  deinitCond runningCond
   deinitLock messagesSeqLock
     
   echo "[startBot]connection ended and bot thread finished. Bye!"
