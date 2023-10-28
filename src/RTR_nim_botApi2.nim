@@ -129,7 +129,16 @@ proc go*(bot:Bot) =
   lastIntent_turn = bot.turnNumber
 
   # build the intent to send to the game server
-  bot.intent = BotIntent(`type`: Type.botIntent)
+  # bot.intent = BotIntent(
+  #   `type`: Type.botIntent,
+  #   bodyColor: bot.getBodyColor(),
+  #   turretColor: bot.getTurretColor(),
+  #   radarColor: bot.getRadarColor(),
+  #   bulletColor: bot.getBulletColor(),
+  #   scanColor: bot.getScanColor(),
+  #   tracksColor: bot.getTracksColor(),
+  #   gunColor: bot.getGunColor()
+  #   )
 
   # signal to send the intent to the game server
   {.locks: [messagesSeqLock].}: bot.messagesToSend.add(bot.intent.toJson)

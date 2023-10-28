@@ -36,7 +36,7 @@ type
     messagesToSend* = newSeq[string]()
 
   Bot* = ref object of BluePrint
-
+  
 proc newBot*(json_file: string): Bot =
   # read the config file from disk
   try:
@@ -74,3 +74,74 @@ proc stop*(bot:BluePrint) =
 
 proc start*(bot:BluePrint) =
   bot.running = true
+
+#++++++++ COLORS +++++++++#
+proc setBodyColor*(bot:BluePrint, color:string) =
+  ## set the body color, permanently
+  ## 
+  ## use hex colors, like ``#FF0000``
+  bot.intent.bodyColor = color
+
+proc setTurretColor*(bot:BluePrint, color:string) =
+  ## set the turret color, permanently
+  ## 
+  ## use hex colors, like ``#FF0000``
+  bot.intent.turretColor = color
+
+proc setRadarColor*(bot:BluePrint, color:string) =
+  ## set the radar color, permanently
+  ## 
+  ## use hex colors, like ``#FF0000``
+  bot.intent.radarColor = color
+
+proc setBulletColor*(bot:BluePrint, color:string) =
+  ## set the bullet color, permanently
+  ## 
+  ## use hex colors, like ``#FF0000``
+  bot.intent.bulletColor = color
+
+proc setScanColor*(bot:BluePrint, color:string) =
+  ## set the scan color, permanently
+  ## 
+  ## use hex colors, like ``#FF0000``
+  bot.intent.scanColor = color
+
+proc setTracksColor*(bot:BluePrint, color:string) =
+  ## set the tracks color, permanently
+  ## 
+  ## use hex colors, like ``#FF0000``
+  bot.intent.tracksColor = color
+
+proc setGunColor*(bot:BluePrint, color:string) =
+  ## set the gun color, permanently
+  ## 
+  ## use hex colors, like ``#FF0000``
+  bot.intent.gunColor = color
+
+proc getBodyColor*(bot:BluePrint):string =
+  ## returns the body color
+  return bot.intent.bodyColor
+
+proc getTurretColor*(bot:BluePrint):string =
+  ## returns the turret color
+  return bot.intent.turretColor
+
+proc getRadarColor*(bot:BluePrint):string =
+  ## returns the radar color
+  return bot.intent.radarColor
+
+proc getBulletColor*(bot:BluePrint):string =
+  ## returns the bullet color
+  return bot.intent.bulletColor
+
+proc getScanColor*(bot:BluePrint):string =
+  ## returns the scan color
+  return bot.intent.scanColor
+
+proc getTracksColor*(bot:BluePrint):string =
+  ## returns the tracks color
+  return bot.intent.tracksColor
+
+proc getGunColor*(bot:BluePrint):string =
+  ## returns the gun color
+  return bot.intent.gunColor
