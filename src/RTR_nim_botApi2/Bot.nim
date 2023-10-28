@@ -1,4 +1,4 @@
-import std/[os, locks]
+import std/[os]
 import jsony
 import Schema
 
