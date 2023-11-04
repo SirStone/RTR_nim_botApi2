@@ -5,9 +5,30 @@ import RTR_nim_botApi2/[Schema, Bot]
 export Schema, Bot
 
 # globals
-var
-  messagesSeqLock:Lock
-  botWorkerChan:Channel[string]
+var botWorkerChan:Channel[string]
+
+proc setConnectionParameters*(bot:Bot, serverConnectionURL:string, secret:string) =
+  ## **Set the connection parameters**
+  ## 
+  ## This method is used to set the connection parameters for the bot to connect to the game server.
+  ## 
+  ## `serverConnectionURL` is the url of the game server
+  ## 
+  ## `secret` is the secret required by the server to connect
+  ## 
+  ## Example:
+  ## 
+  ## ```nim
+  ## setConnectionParameters("ws://localhost:1234", "botsecretcode")
+  ## ```
+  ## 
+  ## This method is optional. If not called the bot will use the default values of `ws://localhost` and `7654`
+  ## 
+  ## This method must be called before `startBot()`
+  ## 
+  ## This method is mostly used for testing
+  bot.serverConnectionURL = serverConnectionURL
+  bot.secret = secret
 
 proc handleMessage(bot:Bot, json_message:string) =
   # Convert the json to a Message object
@@ -120,71 +141,48 @@ proc handleMessage(bot:Bot, json_message:string) =
 
   else: echo "NOT HANDLED MESSAGE: ",json_message
 
-var lastIntent_turn:int = -1
-proc go*(bot:Bot) =
-  # Sending intent to server if the last turn we sent it is different from the current turn
-  if bot.turnNumber == lastIntent_turn: return
-
-  # update the last turn we sent the intent
-  lastIntent_turn = bot.turnNumber
-
-  # build the intent to send to the game server
-  # bot.intent = BotIntent(
-  #   `type`: Type.botIntent,
-  #   bodyColor: bot.getBodyColor(),
-  #   turretColor: bot.getTurretColor(),
-  #   radarColor: bot.getRadarColor(),
-  #   bulletColor: bot.getBulletColor(),
-  #   scanColor: bot.getScanColor(),
-  #   tracksColor: bot.getTracksColor(),
-  #   gunColor: bot.getGunColor()
-  #   )
-
-  # signal to send the intent to the game server
-  {.locks: [messagesSeqLock].}: bot.messagesToSend.add(bot.intent.toJson)
-
 proc botWorker(bot:Bot) {.thread.} =
   bot.botReady = true
-  echo "[botWorker] READY!"
+  echo "[",bot.name,".botWorker] READY!"
 
   # While the bot is connected to the server the bot thread should live
-  echo "[botWorker] waiting for connection"
+  echo "[",bot.name,".botWorker] waiting for connection"
   var msg = botWorkerChan.recv()
 
   case msg:
   of "QUIT":
-    echo "[botWorker] QUIT"
+    echo "[",bot.name,".botWorker] QUIT"
     return
   else:
-    echo "[botWorker] connection aknowledged"
+    echo "[",bot.name,".botWorker] connection aknowledged"
 
     while bot.connected:
-      echo "[botWorker] waiting for running"
+      echo "[",bot.name,".botWorker] waiting for running"
       # First is waiting doing nothing for the bot to be in running state
       msg = botWorkerChan.recv()
 
       case msg:
       of "QUIT":
-        echo "[botWorker] QUIT"
+        echo "[",bot.name,".botWorker] QUIT"
         return
       else:
-        echo "[botWorker] running the custom bot run() method"
+        echo "[",bot.name,".botWorker] running the custom bot run() method"
 
         # Second run the bot 'run()' method, the one scripted by the bot creator
         # this could be going in loop until the bot is dead or could finish up quickly or could be that is not implemented at all
         run bot
 
-        echo "[botWorker] automatic GO started"
+        echo "[",bot.name,".botWorker] automatic GO started"
         # Third, when the bot creator's 'run()' exits, if the bot is still runnning, we send the intent automatically
         while isRunning(bot):
           go bot
 
-        echo "[botWorker] automatic GO ended"
+        echo "[",bot.name,".botWorker] automatic GO ended"
 
 proc conectionHandler(bot:Bot) {.async.} =
   try:
     var ws = await newWebSocket(bot.serverConnectionURL)
-    echo "[conectionHandler] connected..."
+    echo "[",bot.name,".conectionHandler] connected..."
 
     proc writer() {.async.} =
       ## Loops while socket is open, looking for messages to write
@@ -194,6 +192,7 @@ proc conectionHandler(bot:Bot) {.async.} =
         {.locks: [messagesSeqLock].}:
           while bot.messagesToSend.len > 0:
             let message = bot.messagesToSend.pop()
+            echo "[",bot.name,".writer] sending message: ", message
             await ws.send(message)
 
         # keep the async stuff happy we need to sleep some times
@@ -213,14 +212,8 @@ proc conectionHandler(bot:Bot) {.async.} =
     asyncCheck writer()
     await reader()
 
-  except WebSocketClosedError:
-    echo "Socket closed. "
-    botWorkerChan.send("QUIT")
-  except WebSocketProtocolMismatchError:
-    echo "Socket client tried to use an unknown protocol: ", getCurrentExceptionMsg()
-    botWorkerChan.send("QUIT")
-  except WebSocketError:
-    echo "Unexpected socket error: ", getCurrentExceptionMsg()
+  except CatchableError:
+    bot.onConnectionError(getCurrentExceptionMsg())
     botWorkerChan.send("QUIT")
 
 proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialPosition(x:0,y:0,angle:0)) =
@@ -259,9 +252,9 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
     createThread botRunner, botWorker, bot
 
     # wait for the threads to be ready
-    echo "[startBot] waiting for bot and intent threads to be ready"
+    echo "[",bot.name,".startBot] waiting for bot and intent threads to be ready"
     while not bot.botReady: sleep(100)
-    echo "[startBot] bot threads are ready: ", bot.botReady
+    echo "[",bot.name,".startBot] bot threads are ready: ", bot.botReady
 
     # connect to the server
     waitFor conectionHandler bot
@@ -271,4 +264,4 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
 
   deinitLock messagesSeqLock
     
-  echo "[startBot]connection ended and bot thread finished. Bye!"
+  echo "[",bot.name,".startBot]connection ended and bot thread finished. Bye!"

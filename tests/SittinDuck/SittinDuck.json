@@ -1,5 +1,5 @@
 {
-    "name": "TEST BOT",
+    "name": "SittinDuck",
     "version": "1.3.0",
     "gameTypes": [
         "melee",
@@ -9,7 +9,7 @@
     "authors": [
         "SirStone"
     ],
-    "description": "TestBot made in Nim",
+    "description": "Utility bot for testing. It's purpose is to stay where is put and not move or shoot",
     "homepage": "",
     "countryCodes": [
         "it"

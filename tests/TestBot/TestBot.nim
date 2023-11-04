@@ -18,6 +18,9 @@ method run(bot:Bot) =
   var current_go = 1
   echo "[TestBot] " & bot.name & " run started, running for"
 
+  # turn around
+  bot.turnRight(360)
+
   current_go = 1
   while isRunning(bot) and current_go <= total_gos:
     randomize()
@@ -29,8 +32,8 @@ method run(bot:Bot) =
     bot.setTracksColor(randomColor())
     bot.setTurretColor(randomColor())
 
-    go bot # send the intent
-    current_go += 1
+    # go bot # send the intent
+    # current_go += 1
     sleep 30
 
   # before exiting, set the colors to white  
@@ -41,6 +44,7 @@ method run(bot:Bot) =
   bot.setScanColor("#FFFFFF")
   bot.setTracksColor("#FFFFFF")
   bot.setTurretColor("#FFFFFF")
+
   echo "[TestBot] ", bot.name, " run stopped"
 
 method onConnect(bot:Bot) =
@@ -48,6 +52,8 @@ method onConnect(bot:Bot) =
 
 method onConnectionError(bot:Bot, error:string) =
   echo "[TestBot]Connection error:", error
+  echo "[TestBot] server url used:",bot.serverConnectionURL
+  echo "[TestBot] secret used:",bot.secret
 
 var skipped_turns = 0
 method onSkippedTurn(bot:Bot, skippedTurnEvent:SkippedTurnEvent) =
