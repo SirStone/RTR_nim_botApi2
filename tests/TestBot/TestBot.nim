@@ -3,7 +3,14 @@ import ../../src/RTR_nim_botApi2    # import the bot api
 startBot newBot("TestBot.json") # start the bot
 # --------------end, the rest is up to you--------------
 
-import std/[os, random]
+import std/[os, random, parsecsv, parseutils]
+
+type
+  Test = object
+    action:string
+    value:float
+    turn_start:int
+    turn_end:int
 
 let pool:array[16, char] = ['1','2','3','4','5','6','7','8','9','0','A','B','C','D','E','F']
 
@@ -13,28 +20,82 @@ proc randomColor():string =
     color &= pool[rand(15)]
   return color
 
+# import tests
+proc importTests():seq[Test] =
+  var testsToDo = newSeq[Test]()
+  var p:CsvParser
+  try:
+    p.open("testsToDo.csv", separator = '|')
+    p.readHeaderRow()
+    while p.readRow():
+      let action = p.rowEntry("action")
+      var value:float
+      var turn_start, turn_end:int
+      discard parseFloat(p.rowEntry("value"), value)
+      discard parseInt(p.rowEntry("turn_start"), turn_start)
+      discard parseInt(p.rowEntry("turn_end"), turn_end)
+      testsToDo.add(Test(action: action, value: value, turn_start: turn_start, turn_end: turn_end))
+    p.close()
+  except CatchableError:
+    echo "Error while reading testsToDo.csv", getCurrentExceptionMsg()
+  return testsToDo
+
 method run(bot:Bot) =
-  let total_gos = 100
-  var current_go = 1
+  # import the tests
+  let testsToDo:seq[Test] = importTests()
+
+  echo "[TestBot] run started "
+  var test_index = 0
+  
+  # adjusting radar and gun movementsrelated to body movements
+  bot.setAdjustGunForBodyTurn(true)
+  bot.setAdjustRadarForGunTurn(true)
+  bot.setAdjustRadarForBodyTurn(true)
+
   echo "[TestBot] " & bot.name & " run started, running for"
 
-  # turn around
-  bot.turnRight(360)
+  while isRunning(bot) and test_index < testsToDo.len:
+    # pick the next test
+    let test = testsToDo[test_index]
 
-  current_go = 1
-  while isRunning(bot) and current_go <= total_gos:
-    randomize()
-    bot.setBodyColor(randomColor())
-    bot.setGunColor(randomColor())
-    bot.setRadarColor(randomColor())
-    bot.setBulletColor(randomColor())
-    bot.setScanColor(randomColor())
-    bot.setTracksColor(randomColor())
-    bot.setTurretColor(randomColor())
+    # check if is the right turn to do the test
+    if test.turn_start == bot.getTurnNumber():
+      # switch color for each test
+      randomize()
+      bot.setBodyColor(randomColor())
+      bot.setGunColor(randomColor())
+      bot.setRadarColor(randomColor())
+      bot.setBulletColor(randomColor())
+      bot.setScanColor(randomColor())
+      bot.setTracksColor(randomColor())
+      bot.setTurretColor(randomColor())
+
+      case test.action:
+      of "turnLeft":
+        bot.turnLeft(test.value)
+      of "turnRight":
+        bot.turnRight(test.value)
+      of "turnGunLeft":
+        bot.turnGunLeft(test.value)
+      of "turnGunRight":
+        bot.turnGunRight(test.value)
+      of "turnRadarLeft":
+        bot.turnRadarLeft(test.value)
+      of "turnRadarRight":
+        bot.turnRadarRight(test.value)
+      of "forward":
+        bot.forward(test.value)
+      of "back":
+        bot.back(test.value)
+      
+      echo "[TestBot] ",test.action," done ",test.value, " at turn ",bot.getTurnNumber()
+      test_index = test_index + 1
+    else:
+      go bot
 
     # go bot # send the intent
     # current_go += 1
-    sleep 30
+    # sleep 30
 
   # before exiting, set the colors to white  
   bot.setBodyColor("#FFFFFF")

@@ -192,7 +192,7 @@ proc conectionHandler(bot:Bot) {.async.} =
         {.locks: [messagesSeqLock].}:
           while bot.messagesToSend.len > 0:
             let message = bot.messagesToSend.pop()
-            echo "[",bot.name,".writer] sending message: ", message
+            # echo "[",bot.name,".writer] sending message: ", message
             await ws.send(message)
 
         # keep the async stuff happy we need to sleep some times

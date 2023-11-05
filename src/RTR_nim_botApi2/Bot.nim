@@ -190,6 +190,43 @@ proc go*(bot:Bot) =
   # reset the intent for the next turn
   resetIntentVariables bot
 
+#++++++++ BOT SETUP +++++++++#
+proc setAdjustGunForBodyTurn*(bot:Bot, adjust:bool) =
+  ## this is permanent, no need to call this multiple times
+  ## 
+  ## use ``true`` if the gun should turn independent from the body
+  ## 
+  ## use ``false`` if the gun should turn with the body
+  bot.intent.adjustGunForBodyTurn = adjust
+
+proc setAdjustRadarForGunTurn*(bot:Bot, adjust:bool) =
+  ## this is permanent, no need to call this multiple times
+  ## 
+  ## use ``true`` if the radar should turn independent from the gun
+  ## 
+  ## use ``false`` if the radar should turn with the gun
+  bot.intent.adjustRadarForGunTurn = adjust
+
+proc setAdjustRadarForBodyTurn*(bot:Bot, adjust:bool) =
+  ## this is permanent, no need to call this multiple times
+  ## 
+  ## use ``true`` if the radar should turn independent from the body
+  ## 
+  ## use ``false`` if the radar should turn with the body
+  bot.intent.adjustRadarForBodyTurn = adjust
+
+proc isAdjustGunForBodyTurn*(bot:Bot):bool =
+  ## returns true if the gun is turning independent from the body
+  return bot.intent.adjustGunForBodyTurn
+
+proc isAdjustRadarForGunTurn*(bot:Bot):bool =
+  ## returns true if the radar is turning independent from the gun
+  return bot.intent.adjustRadarForGunTurn
+
+proc isAdjustRadarForBodyTurn*(bot:Bot):bool =
+  ## returns true if the radar is turning independent from the body
+  return bot.intent.adjustRadarForBodyTurn
+
 
 #++++++++ COLORS HANDLING +++++++++#
 proc setBodyColor*(bot:BluePrint, color:string) =
@@ -261,6 +298,28 @@ proc getTracksColor*(bot:BluePrint):string =
 proc getGunColor*(bot:BluePrint):string =
   ## returns the gun color
   return bot.intent.gunColor
+
+#++++++++ ARENA +++++++++#
+proc getArenaHeight*(bot:Bot):int =
+  ## returns the arena height (vertical)
+  return bot.gameSetup.arenaHeight
+
+proc getArenaWidth*(bot:Bot):int =
+  ## returns the arena width (horizontal)
+  return bot.gameSetup.arenaWidth
+
+#++++++++ GAME AND BOT STATUS +++++++++#
+proc getTurnNumber*(bot:Bot):int =
+  ## returns the current turn number
+  return bot.turnNumber
+
+proc getX*(bot:Bot):float =
+  ## returns the bot's X position
+  return bot.botState.x
+
+proc getY*(bot:Bot):float =
+  ## returns the bot's Y position
+  return bot.botState.y
 
 #++++++++ TURNING RADAR +++++++++#
 proc setRadarTurnRate*(bot:Bot, degrees:float) =
@@ -389,7 +448,7 @@ proc getGunDirection*(bot:Bot):float =
   ## returns the current gun direction in degrees
   return bot.botState.gunDirection
 
-proc getMaxGunTurnRate*():float =
+proc getMaxGunTurnRate*(bot:Bot):float =
   return MAX_GUN_TURN_RATE
 
 
@@ -449,7 +508,7 @@ proc getDirection*(bot:Bot):float =
   ## returns the current body direction in degrees
   return bot.botState.direction
 
-proc getMaxTurnRate*():float =
+proc getMaxTurnRate*(bot:Bot):float =
   ## returns the maximum turn rate of the body in degrees
   return MAX_TURN_RATE
 
