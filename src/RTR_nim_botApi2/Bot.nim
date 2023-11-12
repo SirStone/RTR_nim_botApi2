@@ -1,6 +1,6 @@
 import std/[os, locks, math]
 import jsony
-import Schema
+import Schemas
 
 type
   BluePrint = ref object of RootObj
@@ -487,7 +487,6 @@ proc turnLeft*(bot:Bot, degrees:float) =
 
     # go until the bot is not running or the remaining_turnRate is 0
     while bot.isRunning and remaining_turnRate != 0:
-      echo "[Bot] remaining_turnRate: ", remaining_turnRate
       go bot
 
     # unlock the bot

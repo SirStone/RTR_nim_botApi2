@@ -62,13 +62,16 @@ method run(bot:Bot) =
     if test.turn_start == bot.getTurnNumber():
       # switch color for each test
       randomize()
-      bot.setBodyColor(randomColor())
-      bot.setGunColor(randomColor())
-      bot.setRadarColor(randomColor())
-      bot.setBulletColor(randomColor())
-      bot.setScanColor(randomColor())
-      bot.setTracksColor(randomColor())
-      bot.setTurretColor(randomColor())
+      let color = randomColor()
+      bot.setBodyColor(color)
+      bot.setGunColor(color)
+      bot.setRadarColor(color)
+      bot.setBulletColor(color)
+      bot.setScanColor(color)
+      bot.setTracksColor(color)
+      bot.setTurretColor(color)
+
+      echo "[TestBot] running test ", test.action
 
       case test.action:
       of "turnLeft":

@@ -1,8 +1,8 @@
 import std/[os, locks, strutils]
 import ws, jsony, json, asyncdispatch
-import RTR_nim_botApi2/[Schema, Bot]
+import RTR_nim_botApi2/[Schemas, Bot]
 
-export Schema, Bot
+export Schemas, Bot
 
 # globals
 var botWorkerChan:Channel[string]
@@ -63,6 +63,11 @@ proc handleMessage(bot:Bot, json_message:string) =
 
   of tickEventForBot:
     let tick_event_for_bot = (TickEventForBot)message
+    
+    # test to remove later
+    if bot.name == "TEST BOT":
+      echo "[",bot.name,".handleMessage] json_message: ", json_message
+
     bot.botState = tick_event_for_bot.botState
 
     bot.turnNumber = tick_event_for_bot.turnNumber
@@ -192,7 +197,7 @@ proc conectionHandler(bot:Bot) {.async.} =
         {.locks: [messagesSeqLock].}:
           while bot.messagesToSend.len > 0:
             let message = bot.messagesToSend.pop()
-            # echo "[",bot.name,".writer] sending message: ", message
+            # echo "[API.writer.",bot.name,"] sending message: ", message
             await ws.send(message)
 
         # keep the async stuff happy we need to sleep some times

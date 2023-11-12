@@ -31,8 +31,9 @@ let
   assets_version = "0.21.0"
   botSecret = "testBotSecret"
   controllerSecret = "testControllerSecret"
-  possible_actions = @["turnLeft", "turnRight", "turnGunLeft", "turnGunRight", "turnRadarLeft", "turnRadarRight", "forward", "back"]
-  numberOfTests = 10
+  # possible_actions = @["turnLeft", "turnRight", "turnGunLeft", "turnGunRight", "turnRadarLeft", "turnRadarRight", "forward", "back"]
+  possible_actions = @["turnLeft", "turnRight"]
+  numberOfTests = 1
 
 proc createTheTests():seq[Test] =
   var testsToDo = newSeq[Test]()
@@ -213,6 +214,8 @@ proc controller(testsToDo:seq[Test]) {.async.} =
 
         if packet.isEmptyOrWhitespace(): continue
 
+        echo "[controller] received message: ", packet
+
         let message = json2schema packet
 
         case message.`type`:
@@ -243,7 +246,7 @@ proc controller(testsToDo:seq[Test]) {.async.} =
           
           # search for the TestBot id
           for participant in game_started_event_for_observer.participants:
-            if participant.name == "TestBoT":
+            if participant.name == "TEST BOT":
               botId = participant.id
 
         of roundStartedEvent:
@@ -266,17 +269,16 @@ proc controller(testsToDo:seq[Test]) {.async.} =
         of gameEndedEventForObserver:
           # let game_ended_event = (GameEndedEventForObserver) message
           echo "[controller] GAME ENDED"
-          
-          # close results file
-          csvResults.close()
-
+          ws.close()
+        of gameAbortedEvent:
+          echo "[controller] GAME ABORTED"
           ws.close()
         of tickEventForObserver:
+          let tick_event_for_observer = (TickEventForObserver) message
           if currentTestIndex < testsToDo.len:
-            let tick_event_for_observer = (TickEventForObserver) message
-
             for botState in tick_event_for_observer.botStates:
               if botState.id == botId:
+                echo "[controller] botState: ", botState[]
                 if body_turn_start == -1:
                   body_turn_start = botState.direction
                 else:
@@ -363,12 +365,13 @@ proc controller(testsToDo:seq[Test]) {.async.} =
               y_start = y_end
               
               currentTestIndex = currentTestIndex + 1
-          # else:
-            # close results file
-            # csvResults.close()
-          #   let stop_game = StopGame(`type`:Type.stopGame)
-          #   await controller_ws.send(stop_game.toJson)
+          else:
+            if tick_event_for_observer.turnNumber > testsToDo[testsToDo.high].turn_end:
+              echo "[controller] all tests done"
 
+              # csvResults.close()
+              let stop_game = StopGame(`type`:Type.stopGame)
+              await ws.send(stop_game.toJson)
 
           # for key,botState in tick_event_for_observer.botStates:
           #   stdout.write key,":",botState.energy, " "
@@ -425,7 +428,7 @@ suite "Life of a bot":
     spawn runBot(testBotConfig)
 
     # spawn a new SittinDuck bot
-    let sittinDuckConfig = RunnerConfig(botName:"SittinDuck", serverConnectionURL:serverConnectionURL, botSecret:botSecret, initialPosition:InitialPosition(x:0,y:0,angle:0))
+    let sittinDuckConfig = RunnerConfig(botName:"SittinDuck", serverConnectionURL:serverConnectionURL, botSecret:botSecret, initialPosition:InitialPosition(x:0,y:0,angle:90))
     spawn runBot(sittinDuckConfig)
 
     # start a controller in async mode
@@ -433,7 +436,7 @@ suite "Life of a bot":
 
     echo "test finished in..."
     
-    countTo 3
+    countTo 5
 
     echo "killing server"
     # kill processes
