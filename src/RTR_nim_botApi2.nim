@@ -1,4 +1,4 @@
-import std/[os, locks, strutils]
+import std/[os, strutils]
 import ws, jsony, json, asyncdispatch
 import RTR_nim_botApi2/[Schemas, Bot]
 
@@ -6,6 +6,12 @@ export Schemas, Bot
 
 # globals
 var botWorkerChan:Channel[string]
+var skipped = 0
+
+# proc to b eused as logging stuff in the stdout
+proc log*(bot:Bot, msg:string) =
+  stdout.writeLine "[" & bot.name & ".log] " & msg
+  stdout.flushFile
 
 proc setConnectionParameters*(bot:Bot, serverConnectionURL:string, secret:string) =
   ## **Set the connection parameters**
@@ -39,12 +45,10 @@ proc handleMessage(bot:Bot, json_message:string) =
   of serverHandshake:
     let server_handshake = (ServerHandshake)message
     let bot_handshake = BotHandshake(`type`:Type.botHandshake, sessionId:server_handshake.sessionId, name:bot.name, version:bot.version, authors:bot.authors, secret:bot.secret, initialPosition:bot.initialPosition)
-    # waitFor bot.gs_ws.send(bot_handshake.toJson)
-    {.locks: [messagesSeqLock].}: bot.messagesToSend.add(bot_handshake.toJson)
+    sendMessage_channel.send(bot_handshake.toJson)
     
     # signal the threads that the connection is ready
     bot.connected = true
-    # {.locks: [botWorker_connectedLock].}: broadcast connectedCond
     botWorkerChan.send("connected")
 
   of gameStartedEventForBot:
@@ -58,21 +62,23 @@ proc handleMessage(bot:Bot, json_message:string) =
     bot.onGameStarted(game_started_event_for_bot)
     
     # send bot ready
-    # waitFor bot.gs_ws.send(BotReady(`type`:Type.botReady).toJson)
-    {.locks: [messagesSeqLock].}: bot.messagesToSend.add(BotReady(`type`:Type.botReady).toJson)
+    sendMessage_channel.send(BotReady(`type`:Type.botReady).toJson)
 
   of tickEventForBot:
     let tick_event_for_bot = (TickEventForBot)message
-    
-    # test to remove later
-    if bot.name == "TEST BOT":
-      echo "[",bot.name,".handleMessage] json_message: ", json_message
 
     bot.botState = tick_event_for_bot.botState
 
     bot.turnNumber = tick_event_for_bot.turnNumber
     bot.roundNumber = tick_event_for_bot.roundNumber
 
+    if bot.first_tick:
+      # Start the bot
+      start bot
+
+      # notify the bot that the round is started
+      botWorkerChan.send("running")
+ 
     # activating the bot method
     bot.onTick(tick_event_for_bot)
 
@@ -123,6 +129,8 @@ proc handleMessage(bot:Bot, json_message:string) =
     # activating the bot method
     bot.onSkippedTurn(skipped_turn_event)
 
+    skipped += 1
+
   of roundEndedEventForBot:
     stop bot
 
@@ -132,13 +140,6 @@ proc handleMessage(bot:Bot, json_message:string) =
     bot.onRoundEnded(round_ended_event_for_bot)
 
   of roundStartedEvent:
-    # Start the bot
-    start bot
-
-    # notify the bot that the round is started
-    # {.locks: [runningLock].}: broadcast runningCond
-    botWorkerChan.send("running")
-
     let round_started_event = (RoundStartedEvent)message
 
     # activating the bot method
@@ -186,22 +187,23 @@ proc botWorker(bot:Bot) {.thread.} =
 
 proc conectionHandler(bot:Bot) {.async.} =
   try:
+    echo "[",bot.name,".conectionHandler] trying to connect to ", bot.serverConnectionURL
     var ws = await newWebSocket(bot.serverConnectionURL)
     echo "[",bot.name,".conectionHandler] connected..."
 
     proc writer() {.async.} =
       ## Loops while socket is open, looking for messages to write
       while ws.readyState == Open:
-        # if there are chat message we have not sent yet
-        # send them
-        {.locks: [messagesSeqLock].}:
-          while bot.messagesToSend.len > 0:
-            let message = bot.messagesToSend.pop()
-            # echo "[API.writer.",bot.name,"] sending message: ", message
-            await ws.send(message)
 
-        # keep the async stuff happy we need to sleep some times
-        await sleepAsync(1)
+        # peek the channel to not block
+        while sendMessage_channel.peek() == 0:
+          await sleepAsync(1)
+        
+        # wait over the channel for a message to send
+        var msg = sendMessage_channel.recv()
+
+        # send the message right away
+        await ws.send(msg)
 
     proc reader() {.async.} =
       # Loops while socket is open, looking for messages to read
@@ -237,9 +239,9 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
   # set the initial position, is the server that will decide to use it or not
   bot.initialPosition = position
 
-  # init the locks and conditions
-  initLock messagesSeqLock
+  # init channels
   botWorkerChan.open()
+  sendMessage_channel.open()
 
   # connect to the Game Server
   if(connect):
@@ -267,6 +269,9 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
     # Waiting for the bot thread to finish
     joinThreads botRunner
 
-  deinitLock messagesSeqLock
+  # close channels
+  botWorkerChan.close()
+  sendMessage_channel.close()
     
   echo "[",bot.name,".startBot]connection ended and bot thread finished. Bye!"
+  echo "[",bot.name,".startBot] skipped turns: ", skipped

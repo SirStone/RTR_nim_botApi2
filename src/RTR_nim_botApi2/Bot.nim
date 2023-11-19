@@ -1,4 +1,4 @@
-import std/[os, locks, math]
+import std/[os, math]
 import jsony
 import Schemas
 
@@ -26,6 +26,7 @@ type
     botState*:BotState
     remainingDistance*:float # The remaining distance to cover
     intent*:BotIntent = BotIntent(`type`: Type.botIntent)
+    first_tick*:bool = true # used to detect if the bot have been stated at first tick
 
     # usage during the games
     botReady*:bool = false
@@ -70,7 +71,7 @@ method onConnectionError*(bot:BluePrint, error:string) {.base gcsafe.} = discard
 #++++++++ system variables ++++++++#
 var botLocked:bool = false
 var lastbotIntentTurn:int = -1
-var messagesSeqLock*:Lock
+var sendMessage_channel*:Channel[string]
 
 #++++++++ GAME PHYSICS ++++++++#
 # bots accelerate at the rate of 1 unit per turn but decelerate at the rate of 2 units per turn
@@ -93,7 +94,6 @@ let MAX_RADAR_TURN_RATE:float = 45
 # The maximum firepower is 3 and the minimum firepower is 0.1
 let MAX_FIRE_POWER:float = 3
 let MIN_FIRE_POWER:float = 0.1
-
 
 #++++++++ REMAININGS ++++++++#
 var remaining_turnRate:float = 0
@@ -125,7 +125,7 @@ proc updateRemainings(bot:Bot) =
       bot.intent.gunTurnRate = min(remaining_turnGunRate, MAX_GUN_TURN_RATE)
       remaining_turnGunRate = max(0, remaining_turnGunRate - MAX_GUN_TURN_RATE)
     else:
-      bot.botState.gunTurnRate = max(remaining_turnGunRate, -MAX_GUN_TURN_RATE)
+      bot.intent.gunTurnRate = max(remaining_turnGunRate, -MAX_GUN_TURN_RATE)
       remaining_turnGunRate = min(0, remaining_turnGunRate + MAX_GUN_TURN_RATE)
 
   # radar turn
@@ -170,9 +170,11 @@ proc isRunning*(bot:BluePrint):bool = bot.running
 
 proc stop*(bot:BluePrint) =
   bot.running = false
+  bot.first_tick = true
 
 proc start*(bot:BluePrint) =
   bot.running = true
+  bot.first_tick = false
 
 proc go*(bot:Bot) =
   # Sending intent to server if the last turn we sent it is different from the current turn
@@ -185,7 +187,8 @@ proc go*(bot:Bot) =
   updateRemainings bot
 
   # signal to send the intent to the game server
-  {.locks: [messagesSeqLock].}: bot.messagesToSend.add(bot.intent.toJson)
+  # {.locks: [messagesSeqLock].}: bot.messagesToSend.add(bot.intent.toJson)
+  sendMessage_channel.send(bot.intent.toJson)
 
   # reset the intent for the next turn
   resetIntentVariables bot
@@ -309,6 +312,10 @@ proc getArenaWidth*(bot:Bot):int =
   return bot.gameSetup.arenaWidth
 
 #++++++++ GAME AND BOT STATUS +++++++++#
+proc getRoundNumber*(bot:Bot):int =
+  ## returns the current round number
+  return bot.roundNumber
+
 proc getTurnNumber*(bot:Bot):int =
   ## returns the current turn number
   return bot.turnNumber
@@ -348,6 +355,12 @@ proc turnRadarLeft*(bot:Bot, degrees:float) =
   ## **BLOCKING CALL**
   
   if not botLocked:
+    # check how much turns is going to take to make the turn
+    let turns_required = (degrees / MAX_RADAR_TURN_RATE).abs.round
+
+    # predict the turn it will be finished
+    let predicted_end_turn = bot.getTurnNumber() + turns_required.toInt
+
     # ask to turnRadar left for all degrees, the server will take care of turnRadaring the bot the max amount of degrees allowed
     bot.setTurnRadarLeft(degrees)
     
@@ -355,7 +368,8 @@ proc turnRadarLeft*(bot:Bot, degrees:float) =
     botLocked = true
 
     # go until the bot is not running or the remaining_turnRadarRate is 0
-    while bot.isRunning and remaining_turnRadarRate != 0: go bot
+    while bot.isRunning and remaining_turnRadarRate != 0 or bot.getTurnNumber() <= predicted_end_turn:
+      go bot
 
     # unlock the bot
     botLocked = false
@@ -423,13 +437,20 @@ proc turnGunLeft*(bot:Bot, degrees:float) =
 
   # ask to turnGun left for all degrees, the server will take care of turnGuning the bot the max amount of degrees allowed
   if not botLocked:
+    # check how much turns is going to take to make the turn
+    let turns_required = (degrees / MAX_GUN_TURN_RATE).abs.round
+
+    # predict the turn it will be finished
+    let predicted_end_turn = bot.getTurnNumber() + turns_required.toInt
+
     bot.setTurnGunLeft(degrees)
     
     # lock the bot, no other actions must be done until the action is completed
     botLocked = true
 
     # go until the bot is not running or the remaining_turnGunRate is 0
-    while bot.isRunning and remaining_turnGunRate != 0: go bot
+    while bot.isRunning and remaining_turnGunRate != 0 or bot.getTurnNumber() <= predicted_end_turn:
+      go bot
 
     # unlock the bot
     botLocked = false
@@ -453,12 +474,12 @@ proc getMaxGunTurnRate*(bot:Bot):float =
 
 
 #++++++++ TURNING BODY +++++++#
-proc setTurnRate(bot:Bot, degrees:float) =
-  ## set the body turn rate if the bot is not locked doing a blocking call
-  ## 
-  ## **OVERRIDES CURRENT VALUE**
-  if not botLocked:
-    remaining_turnRate = degrees
+# proc setTurnRate(bot:Bot, degrees:float) =
+#   ## set the body turn rate if the bot is not locked doing a blocking call
+#   ## 
+#   ## **OVERRIDES CURRENT VALUE**
+#   if not botLocked:
+#     remaining_turnRate = degrees
 
 proc setTurnLeft*(bot:Bot, degrees:float) =
   ## set the body to turn left by `degrees` if the bot is not locked doing a blocking call
@@ -479,6 +500,12 @@ proc turnLeft*(bot:Bot, degrees:float) =
   ## **BLOCKING CALL**
 
   if not botLocked:
+    # check how much turns is going to take to make the turn
+    let turns_required = (degrees / MAX_TURN_RATE).abs.round
+
+    # predict the turn it will be finished
+    let predicted_end_turn = bot.getTurnNumber() + turns_required.toInt
+
     # ask to turn left for all degrees, the server will take care of turning the bot the max amount of degrees allowed
     bot.setTurnLeft(degrees)
     
@@ -486,7 +513,7 @@ proc turnLeft*(bot:Bot, degrees:float) =
     botLocked = true
 
     # go until the bot is not running or the remaining_turnRate is 0
-    while bot.isRunning and remaining_turnRate != 0:
+    while bot.isRunning and remaining_turnRate != 0 or bot.getTurnNumber() <= predicted_end_turn:
       go bot
 
     # unlock the bot
@@ -496,7 +523,6 @@ proc turnRight*(bot:Bot, degrees:float) =
   ## turn the body right by `degrees` if the bot is not locked doing another blocking call
   ## 
   ## **BLOCKING CALL**
-  echo "[Bot.turnRight] ", degrees
   bot.turnLeft(-degrees)
 
 proc getTurnRemaining*(bot:Bot):float =
@@ -553,6 +579,40 @@ proc forward*(bot:Bot, distance:float) =
   ## **BLOCKING CALL**
 
   if not botLocked:
+    # check how much turns is going to take to make the move
+    # here there's acceleration and decelaration involved!
+
+    # all the varaibles we need to calculate the turns required for thi move
+    var
+      turnsToMaxSpeed:float = 0
+      turnsUsedToGoAtFullSpeed:float = 0
+      turnsRequiredToStop:float = 0
+
+    let abs_speed = bot.botState.speed.ceil
+
+    # how much distance requires to reach MAX_SPEED? t = (V_target - V_current) / acceleration
+    turnsToMaxSpeed = ((MAX_SPEED - abs_speed) / ACCELERATION)
+    
+    # how much distance requires to reach MAX_SPEED? d = V_current * t + 0.5 * acceleration * t^2
+    let distanceRequiredToMaxSpeed = abs_speed * turnsToMaxSpeed + 0.5 * ACCELERATION * turnsToMaxSpeed.pow(2)
+
+    # how much dstance remains after reaching MAX_SPEED? d = distance - distanceRequiredToMaxSpeed
+    let remainingDistanceAfterMaxSpeed = distance - distanceRequiredToMaxSpeed
+
+    if remainingDistanceAfterMaxSpeed > 0:
+      # how many turns are required to stop from max speed? t = (V_target - V_current) / -acceleration
+      turnsRequiredToStop = (-MAX_SPEED / DECELERATION)
+
+      # check how much distance in full speed
+      let distanceInFullSpeed = remainingDistanceAfterMaxSpeed - turnsRequiredToStop
+
+      if(distanceInFullSpeed) > 0: # we have some distance to cover to full speed
+        # how many turns to cover the distanceFullSpeed? t = distanceInFullSpeed / MAX_SPEED
+        turnsUsedToGoAtFullSpeed = (distanceInFullSpeed / MAX_SPEED)
+
+    # predict the turn it will be finished
+    let predicted_end_turn = bot.getTurnNumber() + turnsToMaxSpeed.toInt + turnsUsedToGoAtFullSpeed.toInt + turnsRequiredToStop.toInt
+
     # ask to move forward for all pixels (distance), the server will take care of moving the bot the max amount of pixels allowed
     bot.setForward(distance)
     
@@ -560,7 +620,8 @@ proc forward*(bot:Bot, distance:float) =
     botLocked = true
 
     # go until the bot is not running or the remaining_turnRate is 0
-    while bot.isRunning and remaining_distance != 0: go bot
+    while bot.isRunning and remaining_distance != 0 or bot.getTurnNumber() <= predicted_end_turn:
+      go bot
 
     # unlock the bot
     botLocked = false

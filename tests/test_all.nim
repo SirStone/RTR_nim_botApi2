@@ -31,9 +31,9 @@ let
   assets_version = "0.21.0"
   botSecret = "testBotSecret"
   controllerSecret = "testControllerSecret"
-  # possible_actions = @["turnLeft", "turnRight", "turnGunLeft", "turnGunRight", "turnRadarLeft", "turnRadarRight", "forward", "back"]
-  possible_actions = @["turnLeft", "turnRight"]
-  numberOfTests = 1
+  possible_actions = @["turnLeft", "turnRight", "turnGunLeft", "turnGunRight", "turnRadarLeft", "turnRadarRight", "forward", "back"]
+  # possible_actions = @["turnGunRight"]
+  numberOfTests = 40
 
 proc createTheTests():seq[Test] =
   var testsToDo = newSeq[Test]()
@@ -45,7 +45,7 @@ proc createTheTests():seq[Test] =
     let action = possible_actions[rand(0..possible_actions.high)]
 
     # sample a random value
-    var value = rand(-360.0..360.0)
+    var value = rand(-360.0..360.0).round
     
     let turn_start_test = testTime
     
@@ -57,9 +57,9 @@ proc createTheTests():seq[Test] =
     of "turnRight":
       dividend = 10
     of "turnGunLeft":
-      dividend = 20
+      dividend = 40
     of "turnGunRight":
-      dividend = 20
+      dividend = 40
     of "turnRadarLeft":
       dividend = 45
     of "turnRadarRight":
@@ -131,9 +131,16 @@ proc countTo(n:int) =
     sleep(1_000)
 
 proc runBot(config:RunnerConfig) {.thread.} =
-  let bot = newBot(config.botName&"/"&config.botName&".json")
-  bot.setConnectionParameters(config.serverConnectionURL, config.botSecret)
-  bot.startBot(position=config.initialPosition)
+  # let bot = newBot(config.botName&"/"&config.botName&".json")
+  # bot.setConnectionParameters(config.serverConnectionURL, config.botSecret)
+  # bot.startBot(position=config.initialPosition)
+
+  echo "[runBot] running bot ", config
+  try:
+    let run_command = "../bin/tests/"&config.botName&"/"&config.botName&".sh -u "&config.serverConnectionURL&" -s "&config.botSecret
+    let bot_process = startProcess(command=run_command, options={poUsePath, poParentStreams, poStdErrToStdOut, poEchoCmd, poEvalCommand})
+  except CatchableError:
+    echo "error with ", config.botName, ":", getCurrentExceptionMsg()
 
 proc buildBot(botName:string) =
   echo "[buildBot] building ", botName
@@ -214,7 +221,7 @@ proc controller(testsToDo:seq[Test]) {.async.} =
 
         if packet.isEmptyOrWhitespace(): continue
 
-        echo "[controller] received message: ", packet
+        # echo "[controller] received message: ", packet
 
         let message = json2schema packet
 
@@ -275,103 +282,102 @@ proc controller(testsToDo:seq[Test]) {.async.} =
           ws.close()
         of tickEventForObserver:
           let tick_event_for_observer = (TickEventForObserver) message
-          if currentTestIndex < testsToDo.len:
-            for botState in tick_event_for_observer.botStates:
-              if botState.id == botId:
-                echo "[controller] botState: ", botState[]
-                if body_turn_start == -1:
-                  body_turn_start = botState.direction
-                else:
-                  body_turn_end = botState.direction
+          # if currentTestIndex < testsToDo.len:
+          #   for botState in tick_event_for_observer.botStates:
+          #     if botState.id == botId:
+          #       if body_turn_start == -1:
+          #         body_turn_start = botState.direction
+          #       else:
+          #         body_turn_end = botState.direction
 
-                if gun_turn_start == -1:
-                  gun_turn_start = botState.gunDirection
-                else:
-                  gun_turn_end = botState.gunDirection
+          #       if gun_turn_start == -1:
+          #         gun_turn_start = botState.gunDirection
+          #       else:
+          #         gun_turn_end = botState.gunDirection
 
-                if radar_turn_start == -1:
-                  radar_turn_start = botState.radarDirection
-                else:
-                  radar_turn_end = botState.radarDirection
+          #       if radar_turn_start == -1:
+          #         radar_turn_start = botState.radarDirection
+          #       else:
+          #         radar_turn_end = botState.radarDirection
 
-                if x_start == -1:
-                  x_start = botState.x
-                else:
-                  x_end = botState.x
+          #       if x_start == -1:
+          #         x_start = botState.x
+          #       else:
+          #         x_end = botState.x
 
-                if y_start == -1:
-                  y_start = botState.y
-                else:
-                  y_end = botState.y
+          #       if y_start == -1:
+          #         y_start = botState.y
+          #       else:
+          #         y_end = botState.y
 
-                break # no need to check other bots
+          #       break # no need to check other bots
 
-            var turn_start_value, turn_end_value, x_start_value, x_end_value, y_start_value, y_end_value:float
-            let current_test = testsToDo[currentTestIndex]
-            var isXY = false
-            case current_test.action:
-            of "turnLeft":
-              turn_start_value = body_turn_start
-              turn_end_value = body_turn_end
-            of "turnRight":
-              turn_start_value = body_turn_start
-              turn_end_value = body_turn_end
-            of "turnGunLeft":
-              turn_start_value = gun_turn_start
-              turn_end_value = gun_turn_end
-            of "turnGunRight":
-              turn_start_value = gun_turn_start
-              turn_end_value = gun_turn_end
-            of "turnRadarLeft":
-              turn_start_value = radar_turn_start
-              turn_end_value = radar_turn_end
-            of "turnRadarRight":
-              turn_start_value = radar_turn_start
-              turn_end_value = radar_turn_end
-            of "forward":
-              x_start_value = x_start
-              y_start_value = y_start
-              x_end_value = x_end
-              y_end_value = y_end
-              isXY = true
-            of "back":
-              x_start_value = x_start
-              y_start_value = y_start
-              x_end_value = x_end
-              y_end_value = y_end
-              isXY = true
+          #   var turn_start_value, turn_end_value, x_start_value, x_end_value, y_start_value, y_end_value:float
+          #   let current_test = testsToDo[currentTestIndex]
+          #   var isXY = false
+          #   case current_test.action:
+          #   of "turnLeft":
+          #     turn_start_value = body_turn_start
+          #     turn_end_value = body_turn_end
+          #   of "turnRight":
+          #     turn_start_value = body_turn_start
+          #     turn_end_value = body_turn_end
+          #   of "turnGunLeft":
+          #     turn_start_value = gun_turn_start
+          #     turn_end_value = gun_turn_end
+          #   of "turnGunRight":
+          #     turn_start_value = gun_turn_start
+          #     turn_end_value = gun_turn_end
+          #   of "turnRadarLeft":
+          #     turn_start_value = radar_turn_start
+          #     turn_end_value = radar_turn_end
+          #   of "turnRadarRight":
+          #     turn_start_value = radar_turn_start
+          #     turn_end_value = radar_turn_end
+          #   of "forward":
+          #     x_start_value = x_start
+          #     y_start_value = y_start
+          #     x_end_value = x_end
+          #     y_end_value = y_end
+          #     isXY = true
+          #   of "back":
+          #     x_start_value = x_start
+          #     y_start_value = y_start
+          #     x_end_value = x_end
+          #     y_end_value = y_end
+          #     isXY = true
 
-            if tick_event_for_observer.turnNumber == current_test.turn_end:
-              var csv_start_value, csv_end_value:string
-              var diff:float
-              if isXY: 
-                diff = actionCheck(current_test.action,@[x_start_value, y_start_value],@[x_end_value, y_end_value],current_test.value)
-                csv_start_value = "x:" & $x_start_value & " y:" & $y_start_value
-                csv_end_value = "x:" & $x_end_value & " y:" & $y_end_value
-              else:
-                diff = actionCheck(current_test.action,turn_start_value,turn_end_value,current_test.value)
-                csv_start_value = $turn_start_value
-                csv_end_value = $turn_end_value
-              let outcome = diff.round.abs == current_test.value.round.abs
-              check outcome
+          #   if tick_event_for_observer.turnNumber == current_test.turn_end:
+          #     var csv_start_value, csv_end_value:string
+          #     var diff:float
+          #     if isXY: 
+          #       diff = actionCheck(current_test.action,@[x_start_value, y_start_value],@[x_end_value, y_end_value],current_test.value)
+          #       csv_start_value = "x:" & $x_start_value & " y:" & $y_start_value
+          #       csv_end_value = "x:" & $x_end_value & " y:" & $y_end_value
+          #     else:
+          #       diff = actionCheck(current_test.action,turn_start_value,turn_end_value,current_test.value)
+          #       csv_start_value = $turn_start_value
+          #       csv_end_value = $turn_end_value
+          #     let outcome = diff.round.abs == current_test.value.round.abs
+          #     check outcome
 
-              # write results to file
-              csvResults.writeLine($tick_event_for_observer.roundNumber & "|" & current_test.action & "|" & csv_start_value & "|" & csv_end_value & "|" & $current_test.value.abs & "|" & $diff.abs & "|" & $outcome)
+          #     # write results to file
+          #     csvResults.writeLine($tick_event_for_observer.roundNumber & "|" & current_test.action & "|" & csv_start_value & "|" & csv_end_value & "|" & $current_test.value.abs & "|" & $diff.abs & "|" & $outcome)
 
-              body_turn_start = body_turn_end
-              gun_turn_start = gun_turn_end
-              radar_turn_start = radar_turn_end
-              x_start = x_end
-              y_start = y_end
+          #     body_turn_start = body_turn_end
+          #     gun_turn_start = gun_turn_end
+          #     radar_turn_start = radar_turn_end
+          #     x_start = x_end
+          #     y_start = y_end
               
-              currentTestIndex = currentTestIndex + 1
-          else:
-            if tick_event_for_observer.turnNumber > testsToDo[testsToDo.high].turn_end:
-              echo "[controller] all tests done"
+          #     currentTestIndex = currentTestIndex + 1
+          # else:
+          #   if tick_event_for_observer.turnNumber > testsToDo[testsToDo.high].turn_end:
+          #     # echo "[controller] all tests done"
 
-              # csvResults.close()
-              let stop_game = StopGame(`type`:Type.stopGame)
-              await ws.send(stop_game.toJson)
+          #     # csvResults.close()
+          #     let stop_game = StopGame(`type`:Type.stopGame)
+          #     await ws.send(stop_game.toJson)
 
           # for key,botState in tick_event_for_observer.botStates:
           #   stdout.write key,":",botState.energy, " "
@@ -434,9 +440,7 @@ suite "Life of a bot":
     # start a controller in async mode
     waitFor controller(testsToDo)
 
-    echo "test finished in..."
-    
-    countTo 5
+    # countTo 5
 
     echo "killing server"
     # kill processes
