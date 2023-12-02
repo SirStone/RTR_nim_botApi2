@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # Get the directory and base name of the script
 script_dir=$(dirname "$0")
@@ -17,9 +17,6 @@ while getopts 'u:s:' flag; do
        exit 1 ;;
   esac
 done
-
-echo "SERVER_URL:$SERVER_URL"
-echo "SERVER SECRET:$SERVER_SECRET"
 
 # Remove the extension from the file name
 bot_name=${script_name%.*}

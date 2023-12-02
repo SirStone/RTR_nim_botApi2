@@ -1,4 +1,4 @@
-import std/[os, strutils]
+import std/[os, locks, strutils, math]
 import ws, jsony, json, asyncdispatch
 import RTR_nim_botApi2/[Schemas, Bot]
 
@@ -12,6 +12,11 @@ var skipped = 0
 proc log*(bot:Bot, msg:string) =
   stdout.writeLine "[" & bot.name & ".log] " & msg
   stdout.flushFile
+
+proc console_log*(bot:Bot, msg:string) =
+  stdout.writeLine msg
+  stdout.flushFile
+  bot.intent.stdOut.add(msg)
 
 proc setConnectionParameters*(bot:Bot, serverConnectionURL:string, secret:string) =
   ## **Set the connection parameters**
@@ -45,7 +50,8 @@ proc handleMessage(bot:Bot, json_message:string) =
   of serverHandshake:
     let server_handshake = (ServerHandshake)message
     let bot_handshake = BotHandshake(`type`:Type.botHandshake, sessionId:server_handshake.sessionId, name:bot.name, version:bot.version, authors:bot.authors, secret:bot.secret, initialPosition:bot.initialPosition)
-    sendMessage_channel.send(bot_handshake.toJson)
+    {.locks: [messagesSeqLock].}: bot.messagesToSend.add(bot_handshake.toJson)
+    # sendMessage_channel.send(bot_handshake.toJson)
     
     # signal the threads that the connection is ready
     bot.connected = true
@@ -62,22 +68,40 @@ proc handleMessage(bot:Bot, json_message:string) =
     bot.onGameStarted(game_started_event_for_bot)
     
     # send bot ready
-    sendMessage_channel.send(BotReady(`type`:Type.botReady).toJson)
+    {.locks: [messagesSeqLock].}: bot.messagesToSend.add(BotReady(`type`:Type.botReady).toJson)
+    # sendMessage_channel.send(BotReady(`type`:Type.botReady).toJson)
 
   of tickEventForBot:
     let tick_event_for_bot = (TickEventForBot)message
-
-    bot.botState = tick_event_for_bot.botState
-
-    bot.turnNumber = tick_event_for_bot.turnNumber
-    bot.roundNumber = tick_event_for_bot.roundNumber
 
     if bot.first_tick:
       # Start the bot
       start bot
 
+      turnRate_done = 0
+      gunTurnRate_done = 0
+      radarTurnRate_done = 0
+      distance_done = 0
+
       # notify the bot that the round is started
       botWorkerChan.send("running")
+    else:
+      # if bot.name == "TEST BOT":
+      #   echo "tick_event_for_bot.botState.direction: ", tick_event_for_bot.botState.direction, " bot.botState.direction: ", bot.botState.direction
+      turnRate_done = tick_event_for_bot.botState.direction - bot.botState.direction
+      turnRate_done = (turnRate_done + 540) mod 360 - 180
+
+      gunTurnRate_done = tick_event_for_bot.botState.gunDirection - bot.botState.gunDirection
+      gunTurnRate_done = (gunTurnRate_done + 540) mod 360 - 180
+
+      radarTurnRate_done = tick_event_for_bot.botState.radarDirection - bot.botState.radarDirection
+      radarTurnRate_done = (radarTurnRate_done + 540) mod 360 - 180
+
+      distance_done = tick_event_for_bot.botState.speed
+
+    bot.botState = tick_event_for_bot.botState
+    bot.turnNumber = tick_event_for_bot.turnNumber
+    bot.roundNumber = tick_event_for_bot.roundNumber
  
     # activating the bot method
     bot.onTick(tick_event_for_bot)
@@ -92,19 +116,39 @@ proc handleMessage(bot:Bot, json_message:string) =
         # Notifiy the bot that it is dead
         bot.onDeath(fromJson($event, BotDeathEvent))
       of Type.botHitWallEvent:
+        # stop bot movement
+        bot.setDistanceRemaining(0)
+
         bot.onHitWall(fromJson($event, BotHitWallEvent))
+      of Type.bulletFiredEvent:
+        bot.intent.firePower = 0 # Reset firepower so the bot stops firing continuously
+        bot.onBulletFired(fromJson($event, BulletFiredEvent))
       of Type.bulletHitBotEvent:
         # conversion from BulletHitBotEvent to HitByBulletEvent
         let hit_by_bullet_event = fromJson($event, HitByBulletEvent)
         hit_by_bullet_event.`type` = Type.hitByBulletEvent
         bot.onHitByBullet(hit_by_bullet_event)
+      of Type.bulletHitBulletEvent:
+        # conversion from BulletHitBulletEvent to HitBulletEvent
+        let bullet_hit_bullet_event = fromJson($event, BulletHitBulletEvent)
+        bullet_hit_bullet_event.`type` = Type.bulletHitBulletEvent
+        bot.onBulletHitBullet(bullet_hit_bullet_event)
+      of Type.bulletHitWallEvent:
+        # conversion from BulletHitWallEvent to HitWallByBulletEvent
+        let bullet_hit_wall_event = fromJson($event, BulletHitWallEvent)
+        bullet_hit_wall_event.`type` = Type.bulletHitWallEvent
+        bot.onBulletHitWall(bullet_hit_wall_event)
       of Type.botHitBotEvent:
+        # stop bot movement
+        bot.setDistanceRemaining(0)
+
         bot.onHitBot(fromJson($event, BotHitBotEvent))
       of Type.scannedBotEvent:
-        bot.onScannedBot(fromJson($event, ScannedBotEvent))        
+        bot.onScannedBot(fromJson($event, ScannedBotEvent))
+      of Type.wonRoundEvent:
+        bot.onWonRound(fromJson($event, WonRoundEvent))     
       else:
         echo "NOT HANDLED BOT TICK EVENT: ", event
-
     
     # send intent
   of gameAbortedEvent:
@@ -194,16 +238,26 @@ proc conectionHandler(bot:Bot) {.async.} =
     proc writer() {.async.} =
       ## Loops while socket is open, looking for messages to write
       while ws.readyState == Open:
+        # if there are chat message we have not sent yet
+        # send them
+        {.locks: [messagesSeqLock].}:
+          while bot.messagesToSend.len > 0:
+            let message = bot.messagesToSend.pop()
+            # echo "[API.writer.",bot.name,"] sending message: ", message, " for turn ", bot.turnNumber
+            await ws.send(message)
 
-        # peek the channel to not block
-        while sendMessage_channel.peek() == 0:
-          await sleepAsync(1)
+        # keep the async stuff happy we need to sleep some times
+        await sleepAsync(1)
+
+        # # peek the channel to not block
+        # while sendMessage_channel.peek() == 0:
+        #   await sleepAsync(1)
         
-        # wait over the channel for a message to send
-        var msg = sendMessage_channel.recv()
+        # # wait over the channel for a message to send
+        # var msg = sendMessage_channel.recv()
 
-        # send the message right away
-        await ws.send(msg)
+        # # send the message right away
+        # await ws.send(msg)
 
     proc reader() {.async.} =
       # Loops while socket is open, looking for messages to read
@@ -239,9 +293,11 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
   # set the initial position, is the server that will decide to use it or not
   bot.initialPosition = position
 
+  initLock messagesSeqLock
+
   # init channels
   botWorkerChan.open()
-  sendMessage_channel.open()
+  # sendMessage_channel.open()
 
   # connect to the Game Server
   if(connect):
@@ -269,9 +325,10 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
     # Waiting for the bot thread to finish
     joinThreads botRunner
 
+  deinitLock messagesSeqLock
   # close channels
   botWorkerChan.close()
-  sendMessage_channel.close()
+  # sendMessage_channel.close()
     
   echo "[",bot.name,".startBot]connection ended and bot thread finished. Bye!"
   echo "[",bot.name,".startBot] skipped turns: ", skipped

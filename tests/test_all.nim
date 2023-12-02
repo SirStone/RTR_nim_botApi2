@@ -18,8 +18,6 @@ type
   Test = object
     action:string
     value:float
-    turn_start:int
-    turn_end:int
 
 # global variables
 var
@@ -32,50 +30,24 @@ let
   botSecret = "testBotSecret"
   controllerSecret = "testControllerSecret"
   possible_actions = @["turnLeft", "turnRight", "turnGunLeft", "turnGunRight", "turnRadarLeft", "turnRadarRight", "forward", "back"]
-  # possible_actions = @["turnGunRight"]
-  numberOfTests = 40
+  # possible_actions = @["forward", "back"]
+  numberOfTests = 10
 
 proc createTheTests():seq[Test] =
   var testsToDo = newSeq[Test]()
   randomize()
-  var testTime = 10 # how much time we have to do each test
 
   for i in 1..numberOfTests:
     # sample a random action
     let action = possible_actions[rand(0..possible_actions.high)]
 
     # sample a random value
-    var value = rand(-360.0..360.0).round
-    
-    let turn_start_test = testTime
-    
-    # calculate the number of turns needed to do the action
-    var dividend:float
-    case action:
-    of "turnLeft":
-      dividend = 10
-    of "turnRight":
-      dividend = 10
-    of "turnGunLeft":
-      dividend = 40
-    of "turnGunRight":
-      dividend = 40
-    of "turnRadarLeft":
-      dividend = 45
-    of "turnRadarRight":
-      dividend = 45
-    of "forward":
-      value = rand(-100.0..100.0).ceil
-      dividend = 3
-    of "back":
-      value = rand(-100.0..100.0).ceil
-      dividend = 3
-    else:
-      dividend = 10
+    var value = rand(-360.0..360.0).round(4)
 
-    let turn_end_test = 10 + testTime + (abs(value) / dividend).int
-    testsToDo.add(Test(action:action, value:value, turn_start:turn_start_test, turn_end:turn_end_test))
-    testtime = turn_end_test + 10
+    if action == "forward" or action == "back":
+      value = rand(-100.0..100.0).round(4)
+    
+    testsToDo.add(Test(action:action, value:value))
 
   # write the tests on the file for the bot
   let fileName = "../bin/tests/TestBot/testsToDo.csv"
@@ -88,11 +60,15 @@ proc createTheTests():seq[Test] =
 
   # write the header
   csv.setFilePos(0)
-  csv.writeLine("action|value|turn_start|turn_end")
+  csv.writeLine("action|value")
 
   # write the tests
   for test in testsToDo:
-    csv.writeLine(test.action & "|" & $(test.value) & "|" & $(test.turn_start) & "|" & $(test.turn_end) )
+    csv.writeLine(test.action & "|" & $(test.value) )
+  # custom tests
+  csv.writeLine("turnMod|90")
+  csv.writeLine("turnRadarTo|0")
+
   csv.close()
   return testsToDo
   
@@ -123,12 +99,12 @@ proc testServerIsRunning():bool =
 #   except CatchableError:
 #     echo "error with the booter:", getCurrentExceptionMsg()
 
-proc countTo(n:int) =
-  echo "[countTo] ",n
-  sleep(1_000)
-  for i in 1..n:
-    echo n-i
-    sleep(1_000)
+# proc countTo(n:int) =
+#   echo "[countTo] ",n
+#   sleep(1_000)
+#   for i in 1..n:
+#     echo n-i
+#     sleep(1_000)
 
 proc runBot(config:RunnerConfig) {.thread.} =
   # let bot = newBot(config.botName&"/"&config.botName&".json")
@@ -138,7 +114,7 @@ proc runBot(config:RunnerConfig) {.thread.} =
   echo "[runBot] running bot ", config
   try:
     let run_command = "../bin/tests/"&config.botName&"/"&config.botName&".sh -u "&config.serverConnectionURL&" -s "&config.botSecret
-    let bot_process = startProcess(command=run_command, options={poUsePath, poParentStreams, poStdErrToStdOut, poEchoCmd, poEvalCommand})
+    discard startProcess(command=run_command, options={poUsePath, poParentStreams, poStdErrToStdOut, poEchoCmd, poEvalCommand})
   except CatchableError:
     echo "error with ", config.botName, ":", getCurrentExceptionMsg()
 
@@ -150,35 +126,35 @@ proc buildBot(botName:string) =
   except CatchableError:
     echo "error with ", botName, ":", getCurrentExceptionMsg()
 
-proc actionCheck(actionType:string, value_start:seq[float], value_end:seq[float], expected:float):float =
-  echo "[TEST] ",actionType,"_start: [x:",value_start[0],",y:",value_start[1],"]"
-  echo "[TEST] ",actionType,"_end: [x:",value_end[0],",y:",value_end[1],"]"
-  return sqrt((value_end[0] - value_start[0]).pow(2) + (value_end[1] - value_start[1]).pow(2))
+# proc actionCheck(actionType:string, value_start:seq[float], value_end:seq[float], expected:float):float =
+#   echo "[TEST] ",actionType,"_start: [x:",value_start[0],",y:",value_start[1],"]"
+#   echo "[TEST] ",actionType,"_end: [x:",value_end[0],",y:",value_end[1],"]"
+#   return sqrt((value_end[0] - value_start[0]).pow(2) + (value_end[1] - value_start[1]).pow(2))
 
-proc actionCheck(actionType:string, value_start:float, value_end:float, expected:float):float =
-  echo "[TEST] ",actionType,"_start: ",value_start
-  echo "[TEST] ",actionType,"_end: ",value_end
+# proc actionCheck(actionType:string, value_start:float, value_end:float, expected:float):float =
+#   echo "[TEST] ",actionType,"_start: ",value_start
+#   echo "[TEST] ",actionType,"_end: ",value_end
 
-  case actionType:
-  of "turnLeft":    
-    result = value_end - value_start
-  of "turnRight":
-    result = value_start - value_end
-  of "turnGunLeft":
-    result = value_end - value_start
-  of "turnGunRight":
-    result = value_start - value_end
-  of "turnRadarLeft":
-    result = value_end - value_start
-  of "turnRadarRight":
-    result = value_start - value_end
-  else:
-    result = 0
+#   case actionType:
+#   of "turnLeft":    
+#     result = value_end - value_start
+#   of "turnRight":
+#     result = value_start - value_end
+#   of "turnGunLeft":
+#     result = value_end - value_start
+#   of "turnGunRight":
+#     result = value_start - value_end
+#   of "turnRadarLeft":
+#     result = value_end - value_start
+#   of "turnRadarRight":
+#     result = value_start - value_end
+#   else:
+#     result = 0
 
-  if expected >= 0:
-    if result < 0: result = result + 360.0
-  else:
-    if result > 0: result = result - 360.0
+#   if expected >= 0:
+#     if result < 0: result = result + 360.0
+#   else:
+#     if result > 0: result = result - 360.0
 
 proc controller(testsToDo:seq[Test]) {.async.} =
   try:
@@ -204,15 +180,10 @@ proc controller(testsToDo:seq[Test]) {.async.} =
         currentTestIndex = 0
         botId = 0
         body_turn_start:float = -1
-        body_turn_end:float = -1
         gun_turn_start:float = -1
-        gun_turn_end:float = -1
         radar_turn_start:float = -1
-        radar_turn_end:float = -1
         x_start:float = -1
-        x_end:float = -1
         y_start:float = -1
-        y_end:float = -1
 
       # Loops while socket is open, looking for messages to read
       while ws.readyState == Open:
@@ -280,8 +251,8 @@ proc controller(testsToDo:seq[Test]) {.async.} =
         of gameAbortedEvent:
           echo "[controller] GAME ABORTED"
           ws.close()
-        of tickEventForObserver:
-          let tick_event_for_observer = (TickEventForObserver) message
+        of tickEventForObserver: discard
+          # let tick_event_for_observer = (TickEventForObserver) message
           # if currentTestIndex < testsToDo.len:
           #   for botState in tick_event_for_observer.botStates:
           #     if botState.id == botId:

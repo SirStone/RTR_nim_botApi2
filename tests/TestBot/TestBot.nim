@@ -11,8 +11,6 @@ type
   Test = object
     action:string
     value:float
-    turn_start:int
-    turn_end:int
 
 let pool:array[16, char] = ['1','2','3','4','5','6','7','8','9','0','A','B','C','D','E','F']
 
@@ -32,11 +30,8 @@ proc importTests():seq[Test] =
     while p.readRow():
       let action = p.rowEntry("action")
       var value:float
-      var turn_start, turn_end:int
       discard parseFloat(p.rowEntry("value"), value)
-      discard parseInt(p.rowEntry("turn_start"), turn_start)
-      discard parseInt(p.rowEntry("turn_end"), turn_end)
-      testsToDo.add(Test(action: action, value: value, turn_start: turn_start, turn_end: turn_end))
+      testsToDo.add(Test(action: action, value: value))
     p.close()
   except CatchableError:
     echo "Error while reading testsToDo.csv", getCurrentExceptionMsg()
@@ -112,7 +107,7 @@ method run(bot:Bot) =
       bot.setTracksColor(color)
       bot.setTurretColor(color)
 
-      echo "[TestBot] running test ", test.action
+      echo "[TestBot] running test ", test.action, " ", test.value
 
       let starting_turn = bot.getTurnNumber()
 
@@ -126,7 +121,6 @@ method run(bot:Bot) =
         action_end_value:string
         expected_value:float
         current_value:float
-        result:bool
 
       case test.action:
       of "turnLeft":
@@ -142,6 +136,7 @@ method run(bot:Bot) =
         gun_turn_start = bot.getGunDirection()
         bot.turnGunRight(test.value)
       of "turnRadarLeft":
+        bot.console_log("TURNING RADAR LEFT")
         radar_turn_start = bot.getRadarDirection()
         bot.turnRadarLeft(test.value)
       of "turnRadarRight":
@@ -155,69 +150,120 @@ method run(bot:Bot) =
         x_start = bot.getX()
         y_start = bot.getY()
         bot.back(test.value)
-
+      of "turnMod":
+        body_turn_start = bot.getDirection()
+        let angle = bot.getDirection() mod test.value
+        echo "[TestBot] turning to ", angle, " test.value: ", test.value
+        bot.turnRight(angle)
+      of "turnRadarTo":
+        radar_turn_start = bot.getRadarDirection()
+        let angle = test.value - bot.getRadarDirection()
+        bot.turnRadarLeft(angle)
+      of "turnGunTo":
+        gun_turn_start = bot.getGunDirection()
+        let angle = test.value - bot.getGunDirection()
+        bot.turnGunLeft(angle)
+      of "setTurnRadarTo":
+        radar_turn_start = bot.getRadarDirection()
+        let angle = test.value - bot.getRadarDirection()
+        bot.setTurnRadarLeft(angle)
 
       echo "[TestBot] ",test.action," ",test.value, " COMPLETED at turn ",bot.getTurnNumber()
 
       case test.action:
       of "turnLeft":
-        action_start_value = $body_turn_start.round(3)
+        action_start_value = $body_turn_start
         action_end_value = $bot.getDirection()
-        expected_value = test.value.abs
-        current_value = actionCheck(test.action,body_turn_start,bot.getDirection(),test.value).abs
-        result = current_value.round.abs == expected_value.round.abs
+        expected_value = test.value.abs mod 360
+        current_value = actionCheck(test.action,body_turn_start,bot.getDirection(),test.value).abs mod 360
       of "turnRight":
-        action_start_value = $body_turn_start.round(3)
+        action_start_value = $body_turn_start
         action_end_value = $bot.getDirection()
-        expected_value = test.value.abs
-        current_value = actionCheck(test.action,body_turn_start,bot.getDirection(),test.value).abs
-        result = current_value.round.abs == expected_value.round.abs
+        expected_value = test.value.abs mod 360
+        current_value = actionCheck(test.action,body_turn_start,bot.getDirection(),test.value).abs mod 360
       of "turnGunLeft":
-        action_start_value = $gun_turn_start.round(3)
+        action_start_value = $gun_turn_start
         action_end_value = $bot.getGunDirection()
-        expected_value = test.value.abs
-        current_value = actionCheck(test.action,gun_turn_start,bot.getGunDirection(),test.value).abs
-        result = current_value.round.abs == expected_value.round.abs
+        expected_value = test.value.abs mod 360
+        current_value = actionCheck(test.action,gun_turn_start,bot.getGunDirection(),test.value).abs mod 360
       of "turnGunRight":
-        action_start_value = $gun_turn_start.round(3)
+        action_start_value = $gun_turn_start
         action_end_value = $bot.getGunDirection()
-        expected_value = test.value.abs
-        current_value = actionCheck(test.action,gun_turn_start,bot.getGunDirection(),test.value).abs
-        result = current_value.round.abs == expected_value.round.abs
+        expected_value = test.value.abs mod 360
+        current_value = actionCheck(test.action,gun_turn_start,bot.getGunDirection(),test.value).abs mod 360
       of "turnRadarLeft":
-        action_start_value = $radar_turn_start.round(3)
+        action_start_value = $radar_turn_start
         action_end_value = $bot.getRadarDirection()
-        expected_value = test.value.abs
-        current_value = actionCheck(test.action,radar_turn_start,bot.getRadarDirection(),test.value).abs
-        result = current_value.round.abs == expected_value.round.abs
+        expected_value = test.value.abs mod 360
+        current_value = actionCheck(test.action,radar_turn_start,bot.getRadarDirection(),test.value).abs mod 360
       of "turnRadarRight":
-        action_start_value = $radar_turn_start.round(3)
+        action_start_value = $radar_turn_start
         action_end_value = $bot.getRadarDirection()
-        expected_value = test.value.abs
-        current_value = actionCheck(test.action,radar_turn_start,bot.getRadarDirection(),test.value).abs
-        result = current_value.round.abs == expected_value.round.abs
+        expected_value = test.value.abs mod 360
+        current_value = actionCheck(test.action,radar_turn_start,bot.getRadarDirection(),test.value).abs mod 360
       of "forward":
         action_start_value = "(" & $x_start.toInt & "," & $y_start.toInt & ")"
         action_end_value = "(" & $bot.getX().toInt & "," & $bot.getY().toInt & ")"
         expected_value = test.value.abs
-        current_value = actionCheck(test.action,@[x_start, y_start],@[bot.getX(), bot.getY()],test.value).round.abs
-        result = current_value.round.abs == expected_value.round.abs
+        current_value = actionCheck(test.action,@[x_start, y_start],@[bot.getX(), bot.getY()],test.value).abs
       of "back":
         action_start_value = "(" & $x_start.toInt & "," & $y_start.toInt & ")"
         action_end_value = "(" & $bot.getX().toInt & "," & $bot.getY().toInt & ")"
         expected_value = test.value.abs
-        current_value = actionCheck(test.action,@[x_start, y_start],@[bot.getX(), bot.getY()],test.value).round.abs
-        result = current_value.round.abs == expected_value.round.abs
+        current_value = actionCheck(test.action,@[x_start, y_start],@[bot.getX(), bot.getY()],test.value).abs
+      of "turnMod":
+        action_start_value = $body_turn_start
+        action_end_value = $bot.getDirection()
+        expected_value = test.value
+        current_value = bot.getDirection()
+      of "turnRadarTo":
+        action_start_value = $radar_turn_start
+        action_end_value = $bot.getRadarDirection()
+        expected_value = test.value
+        current_value = bot.getRadarDirection()
+      of "turnGunTo":
+        action_start_value = $gun_turn_start
+        action_end_value = $bot.getGunDirection()
+        expected_value = test.value
+        current_value = bot.getGunDirection()
 
       # write the results
-      csvResults.writeLine($bot.getRoundNumber() & "|" & $starting_turn & "|" & $bot.getTurnNumber() & "|" & test.action & "|" & $test.value & "|" & action_start_value & "|" & action_end_value & "|" & $expected_value & "|" & $current_value & "|" & $(current_value - expected_value) & "|" & $result)
-
-      for i in 0..60:
-        sleep(1)
-        go bot
+      let result = (current_value - expected_value).abs < 0.001
+      let diff = current_value - expected_value
+      let distance = if diff > 0: "+" & $diff else: $diff
+      csvResults.writeLine($bot.getRoundNumber() & "|" & $starting_turn & "|" & $bot.getTurnNumber() & "|" & test.action & "|" & $test.value & "|" & action_start_value & "|" & action_end_value & "|" & $expected_value & "|" & $current_value & "|" & distance & "|" & $result)
 
   # close the file
   csvResults.close()
+
+  # shooting test, colors all black
+  bot.setBodyColor("#000000")
+  bot.setGunColor("#000000")
+  bot.setRadarColor("#000000")
+  bot.setBulletColor("#000000")
+  bot.setScanColor("#000000")
+  bot.setTracksColor("#000000")
+  bot.setTurretColor("#000000")
+
+  # shoot 4 bullets in 4 directions
+  # while we have not completed the 360 degrees turn of the radar if we meet one angle we shoot
+  bot.turnGunRight(bot.getGunDirection())
+  bot.setTurnGunLeft(360)
+  echo "[TestBot] gun direction: ", bot.getGunDirection()
+  echo "[TestBot] gun turn remaining: ", bot.getGunTurnRemaining()
+  var last_turn = -1
+  while bot.isRunning() and bot.getGunTurnRemaining() > 0.001:
+    sleep(1)
+    if last_turn == bot.getTurnNumber():
+      continue
+
+    last_turn = bot.getTurnNumber()
+      
+    if (bot.getGunDirection() - 220.0).abs < 0.001:
+      bot.fire(0.1)
+      echo "[TestBot] FIRE: gun direction: ", bot.getGunDirection(), " turn number: ", bot.getTurnNumber(), " gun heat: ", bot.getGunHeat()
+    
+    go bot
 
   # before exiting, set the colors to white  
   bot.setBodyColor("#FFFFFF")
@@ -250,3 +296,22 @@ method onHitByBullet(bot:Bot, hitByBulletEvent:HitByBulletEvent) =
 
 method onDeath(bot:Bot, botDeathEvent:BotDeathEvent) =
   echo "[TestBot]I'm dead! turn: ", botDeathEvent.turnNumber
+
+method onWonRound(bot:Bot, wonRoundEvent:WonRoundEvent) =
+  echo "[TestBot]I won the round! ", wonRoundEvent.turnNumber
+
+method onBulletHitWall(bot:Bot, bulletHitWallEvent:BulletHitWallEvent) =
+  # echo "[TestBot]Bullet hit wall ", bulletHitWallEvent.bullet[]
+  # open file for tests results
+  let fileNameResults = joinPath(getAppDir(),"testsResults_byTestBot.csv")
+  
+  # create the new test file
+  var csvResults = open(fileNameResults, fmAppend)
+
+  # write the results
+  let diff = 220 - bulletHitWallEvent.bullet.direction
+  let result = diff.abs < 0.001
+  csvResults.writeLine($bot.getRoundNumber() & "| none | none | shooting | 220 | none | none | 220 |" & $bulletHitWallEvent.bullet.direction & "|" & $diff & "|" & $result)
+  
+  # close the file
+  csvResults.close()
