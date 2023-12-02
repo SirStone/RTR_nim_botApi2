@@ -6,6 +6,6 @@ stable.mkShell {
   nativeBuildInputs = [ 
     unstable.buildPackages.nim2
     unstable.buildPackages.nimPackages.nimble
-    unstable.zulu
+    unstable.jdk
   ];
 }
