@@ -75,7 +75,7 @@ type
     x*: float #X coordinate of victim bot
     y*: float #Y coordinate of victim bot
     rammed*: bool #Flag specifying, if the victim bot got rammed
-  
+
   BotHitWallEvent* = ref object of Event
     victimId*: int #ID of the victim bot that hit the wall
 

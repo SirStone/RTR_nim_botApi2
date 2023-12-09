@@ -192,8 +192,6 @@ proc controller(testsToDo:seq[Test]) {.async.} =
 
         if packet.isEmptyOrWhitespace(): continue
 
-        # echo "[controller] received message: ", packet
-
         let message = json2schema packet
 
         case message.`type`:

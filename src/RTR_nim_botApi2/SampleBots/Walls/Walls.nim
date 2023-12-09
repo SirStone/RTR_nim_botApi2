@@ -19,7 +19,6 @@ method run(bot:Bot) =
   
   # Initialize moveAmount to the maximum possible for the arena
   moveAmount = max(bot.getArenaWidth(), bot.getArenaHeight()).float
-  bot.console_log("moveAmount: " & $moveAmount)
 
   # Initialize peek to false
   peek = false

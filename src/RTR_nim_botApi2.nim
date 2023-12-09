@@ -2,11 +2,12 @@ import std/[os, locks, strutils, math]
 import ws, jsony, json, asyncdispatch
 import RTR_nim_botApi2/[Schemas, Bot]
 
-export Schemas, Bot
+export Schemas, Bot, Condition
 
 # globals
 var botWorkerChan:Channel[string]
 var customConditionsWorkerChan:Channel[string]
+var waitForWorkerChan:Channel[string]
 var skipped = 0
 
 # proc to b eused as logging stuff in the stdout
@@ -49,33 +50,24 @@ proc addCustomCondition*(bot:Bot, name:string, test:proc (bot:Bot):bool) {.gcsaf
   ## `test` is the function that will be called to test the condition
   {.locks: [customConditionsLock] gcsafe.}: customConditions.add(Condition(name: name, test: test))
 
-# proc to run a custom codition in async mode
+# proc to run a custom codition in different thread
 proc customConditionsWorker(bot:Bot) {.thread.} =
-  echo "[",bot.name,".customConditionsWorker] READY!"
-
   # While the bot is connected to the server the bot thread should live
-  echo "[",bot.name,".customConditionsWorker] waiting for connection"
   var msg = customConditionsWorkerChan.recv()
 
   case msg:
   of "QUIT":
-    echo "[",bot.name,".customConditionsWorker] QUIT"
     return
   else:
-    echo "[",bot.name,".customConditionsWorker] connection aknowledged"
-
     while bot.connected:
-      echo "[",bot.name,".customConditionsWorker] waiting for running"
       # First is waiting doing nothing for the bot to be in running state
       let msg = customConditionsWorkerChan.recv()
 
       case msg:
       of "QUIT":
-        echo "[",bot.name,".customConditionsWorker] QUIT"
         return
       else:
-        echo "[",bot.name,".customConditionsWorker] running the custom conditions"
-        while isRunning(bot):
+        while isRunning(bot) and bot.connected:
           # check the custom coditions
           {.locks: [customConditionsLock] gcsafe.}:
             for customCondition in customConditions:
@@ -193,12 +185,6 @@ proc handleMessage(bot:Bot, json_message:string) =
         bot.onWonRound(fromJson($event, WonRoundEvent))     
       else:
         echo "NOT HANDLED BOT TICK EVENT: ", event
-
-      # # check the custom coditions
-      # for customCondition in customConditions:
-      #   echo "checking custom condition: ", customCondition.name, " for bot: ", bot.name, " with value: ", customCondition.test(bot)
-      #   if customCondition.test(bot):
-      #     bot.onCustomCondition(customCondition.name)
     
   of gameAbortedEvent:
     stop bot
@@ -240,47 +226,31 @@ proc handleMessage(bot:Bot, json_message:string) =
 
   else: echo "NOT HANDLED MESSAGE: ",json_message
 
-  stdout.write("-")
-  stdout.flushFile
-
 proc botWorker(bot:Bot) {.thread.} =
   bot.botReady = true
-  echo "[",bot.name,".botWorker] READY!"
 
   # While the bot is connected to the server the bot thread should live
-  echo "[",bot.name,".botWorker] waiting for connection"
   var msg = botWorkerChan.recv()
 
   case msg:
   of "QUIT":
-    echo "[",bot.name,".botWorker] QUIT"
     return
   else:
-    echo "[",bot.name,".botWorker] connection aknowledged"
-
     while bot.connected:
-      echo "[",bot.name,".botWorker] waiting for running"
       # First is waiting doing nothing for the bot to be in running state
       msg = botWorkerChan.recv()
 
       case msg:
       of "QUIT":
-        echo "[",bot.name,".botWorker] QUIT"
         return
       else:
-        echo "[",bot.name,".botWorker] running the custom bot run() method"
-
         # Second run the bot 'run()' method, the one scripted by the bot creator
         # this could be going in loop until the bot is dead or could finish up quickly or could be that is not implemented at all
         run bot
 
-        echo "[",bot.name,".botWorker] automatic GO started"
         # Third, when the bot creator's 'run()' exits, if the bot is still runnning, we send the intent automatically
-        while isRunning(bot):
-          if not botLocked:
-            go bot
-
-        echo "[",bot.name,".botWorker] automatic GO ended"
+        while isRunning(bot) and bot.connected:
+          go bot
 
 proc conectionHandler(bot:Bot) {.async.} =
   try:
@@ -302,16 +272,6 @@ proc conectionHandler(bot:Bot) {.async.} =
         # keep the async stuff happy we need to sleep some times
         await sleepAsync(1)
 
-        # # peek the channel to not block
-        # while sendMessage_channel.peek() == 0:
-        #   await sleepAsync(1)
-        
-        # # wait over the channel for a message to send
-        # var msg = sendMessage_channel.recv()
-
-        # # send the message right away
-        # await ws.send(msg)
-
     proc reader() {.async.} =
       # Loops while socket is open, looking for messages to read
       while ws.readyState == Open:
@@ -319,9 +279,6 @@ proc conectionHandler(bot:Bot) {.async.} =
         var packet = await ws.receiveStrPacket()
 
         if packet.isEmptyOrWhitespace(): continue
-
-        stdout.write("+")
-        stdout.flushFile
 
         handleMessage(bot, packet)
 
@@ -332,6 +289,15 @@ proc conectionHandler(bot:Bot) {.async.} =
   except CatchableError:
     bot.onConnectionError(getCurrentExceptionMsg())
     botWorkerChan.send("QUIT")
+    customConditionsWorkerChan.send("QUIT")
+
+proc timeout(bot:Bot, s:int) {.async.} =
+  await sleepAsync(s * 1000)
+  if(not bot.connected):
+    echo "timeout"
+    botWorkerChan.send("QUIT")
+    customConditionsWorkerChan.send("QUIT")
+
 
 proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialPosition(x:0,y:0,angle:0)) =
   ## **Start the bot**
@@ -355,6 +321,7 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
   # init channels
   botWorkerChan.open()
   customConditionsWorkerChan.open()
+  waitForWorkerChan.open()
   # sendMessage_channel.open()
 
   # connect to the Game Server
@@ -379,6 +346,9 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
     while not bot.botReady: sleep(100)
     echo "[",bot.name,".startBot] bot threads are ready: ", bot.botReady
 
+    # start a timeout, in seconds, if the bot is not connected in time we quit
+    asyncCheck bot.timeout(10)
+
     # connect to the server
     waitFor conectionHandler bot
 
@@ -390,6 +360,7 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
   # close channels
   botWorkerChan.close()
   customConditionsWorkerChan.close()
+  waitForWorkerChan.close()
   # sendMessage_channel.close()
     
   echo "[",bot.name,".startBot]connection ended and bot thread finished. Bye!"

@@ -36,7 +36,5 @@ method onCustomCondition(bot:Bot, name:string) =
     echo "Ouch, down to ", bot.getEnergy() + 0.5, " energy."
 
     # Move around a bit
-    echo "Moving out of the way...1"
     bot.turnLeft(65);
-    echo "Moving out of the way...2"
     bot.forward(100);

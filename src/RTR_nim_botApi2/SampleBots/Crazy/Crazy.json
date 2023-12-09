@@ -1,5 +1,5 @@
 {
-    "name": "Target NIM",
+    "name": "Crazy NIM",
     "version": "1.0.0",
     "gameTypes": [
         "melee",
@@ -9,7 +9,7 @@
     "authors": [
         "SirStone"
     ],
-    "description": "replica of the original Target, computed in Nim",
+    "description": "replica of the original Crazy, computed in Nim",
     "homepage": "",
     "countryCodes": [
         "it"
