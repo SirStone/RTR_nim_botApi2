@@ -1,16 +1,68 @@
 # This script compiles all the sample bots in the SampleBots directory.
 
-# For each bot directory in the src SampleBots directory, compile the bot.nim file ina corresponding directory in the bin SampleBots directory
-for botDir in $(ls -d */); do
-    botName=$(basename "$botDir")
+# get the first parameter as the bot to compile, if the parameter doesn't exists, compile all bots
+botToCompile="$1"
+
+# some checks
+if [ -n "$botToCompile" ]; then
+    # If the bot to compile is specified, check if it exists
+    if [ ! -d "$botToCompile" ]; then
+        echo "The bot to compile doesn't exists"
+        exit 1
+    fi
+    # If the bot to compile is specified, check if the bot.nim file exists
+    if [ ! -f "$botToCompile/$botToCompile.nim" ]; then
+        echo "The bot.nim file doesn't exists"
+        exit 1
+    fi
+    # If the bot to compile is specified, check if the bot.json file exists
+    if [ ! -f "$botToCompile/$botToCompile.json" ]; then
+        echo "The bot.json file doesn't exists"
+        exit 1
+    fi
+    # If the bot to compile is specified, check if the bot.sh file exists
+    if [ ! -f "$botToCompile/$botToCompile.sh" ]; then
+        echo "The bot.sh file doesn't exists"
+        exit 1
+    fi
+fi
+
+
+run=false
+# check if the flag "--run" in any position exists
+if [[ "$@" =~ "--run" ]]; then
+    run=true
+fi
+
+# compile funzion to call for each bot
+compileBot() {
+    botName=$(basename "$1")
+    echo "Compiling $botName"
     sampleBotOutputDir="../../../bin/SampleBots/$botName"
     mkdir -p "$sampleBotOutputDir"
-    nim c -d:release -d:danger --outDir:"$sampleBotOutputDir" "./$botName/$botName.nim"
+    nim c -d:release -d:danger --outDir:"$sampleBotOutputDir" "./$botName/$botName.nim" #for release 
+    # nim c --outDir:"$sampleBotOutputDir" "./$botName/$botName.nim" #for debug
     
     # GOING FORWARD ONLY IF COMPILE IS OK
     if [ $? -eq 0 ]; then
         cp "./$botName/$botName.json" "$sampleBotOutputDir"
         cp "./$botName/$botName.sh" "$sampleBotOutputDir"
         chmod +x "$sampleBotOutputDir/$botName.sh"
+
+        if [ "$run" = true ]; then
+            echo "Running $botName"
+            cd "$sampleBotOutputDir"
+            bash "$botName.sh"
+        fi
     fi
-done
+}
+
+if [ -n "$botToCompile" ]; then
+    # If the bot to compile is specified, compile only that bot
+    compileBot "$botToCompile"
+else
+    # If the bot to compile is not specified, compile all bots
+    for bot in */; do
+        compileBot "$bot"
+    done
+fi
