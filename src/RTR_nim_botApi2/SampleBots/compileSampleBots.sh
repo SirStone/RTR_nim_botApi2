@@ -1,7 +1,11 @@
 # This script compiles all the sample bots in the SampleBots directory.
 
-# get the first parameter as the bot to compile, if the parameter doesn't exists, compile all bots
-botToCompile="$1"
+# if the first argument is "--run" botTocompile must be empty, otherwise it will be the first argument
+if [ "$1" = "--run" ]; then
+    botToCompile=""
+else
+    botToCompile="$1"
+fi
 
 # some checks
 if [ -n "$botToCompile" ]; then
@@ -52,7 +56,13 @@ compileBot() {
         if [ "$run" = true ]; then
             echo "Running $botName"
             cd "$sampleBotOutputDir"
-            bash "$botName.sh"
+
+            if [[ "$@" =~ "--background" ]]; then
+                bash "$botName.sh" &
+            else
+                bash "$botName.sh"
+            fi
+            cd -
         fi
     fi
 }
@@ -63,6 +73,6 @@ if [ -n "$botToCompile" ]; then
 else
     # If the bot to compile is not specified, compile all bots
     for bot in */; do
-        compileBot "$bot"
+        compileBot "$bot" --background
     done
 fi
