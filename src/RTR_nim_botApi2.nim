@@ -6,6 +6,7 @@ export Schemas, Bot
 
 # globals
 var botWorkerChan:Channel[string]
+var customConditionsWorkerChan:Channel[string]
 var skipped = 0
 
 # proc to b eused as logging stuff in the stdout
@@ -41,6 +42,47 @@ proc setConnectionParameters*(bot:Bot, serverConnectionURL:string, secret:string
   bot.serverConnectionURL = serverConnectionURL
   bot.secret = secret
 
+proc addCustomCondition*(bot:Bot, name:string, test:proc (bot:Bot):bool) {.gcsafe.} =
+  ## add a custom condition to the bot
+  ## 
+  ## `name` is the name of the condition
+  ## `test` is the function that will be called to test the condition
+  {.locks: [customConditionsLock] gcsafe.}: customConditions.add(Condition(name: name, test: test))
+
+# proc to run a custom codition in async mode
+proc customConditionsWorker(bot:Bot) {.thread.} =
+  echo "[",bot.name,".customConditionsWorker] READY!"
+
+  # While the bot is connected to the server the bot thread should live
+  echo "[",bot.name,".customConditionsWorker] waiting for connection"
+  var msg = customConditionsWorkerChan.recv()
+
+  case msg:
+  of "QUIT":
+    echo "[",bot.name,".customConditionsWorker] QUIT"
+    return
+  else:
+    echo "[",bot.name,".customConditionsWorker] connection aknowledged"
+
+    while bot.connected:
+      echo "[",bot.name,".customConditionsWorker] waiting for running"
+      # First is waiting doing nothing for the bot to be in running state
+      let msg = customConditionsWorkerChan.recv()
+
+      case msg:
+      of "QUIT":
+        echo "[",bot.name,".customConditionsWorker] QUIT"
+        return
+      else:
+        echo "[",bot.name,".customConditionsWorker] running the custom conditions"
+        while isRunning(bot):
+          # check the custom coditions
+          {.locks: [customConditionsLock] gcsafe.}:
+            for customCondition in customConditions:
+                if customCondition.test(bot):
+                  bot.onCustomCondition(customCondition.name)
+          sleep 1
+
 proc handleMessage(bot:Bot, json_message:string) =
   # Convert the json to a Message object
   let message = json2schema json_message
@@ -56,6 +98,7 @@ proc handleMessage(bot:Bot, json_message:string) =
     # signal the threads that the connection is ready
     bot.connected = true
     botWorkerChan.send("connected")
+    customConditionsWorkerChan.send("connected")
 
   of gameStartedEventForBot:
     let game_started_event_for_bot = (GameStartedEventForBot)message
@@ -85,6 +128,7 @@ proc handleMessage(bot:Bot, json_message:string) =
 
       # notify the bot that the round is started
       botWorkerChan.send("running")
+      customConditionsWorkerChan.send("running")
     else:
       # if bot.name == "TEST BOT":
       #   echo "tick_event_for_bot.botState.direction: ", tick_event_for_bot.botState.direction, " bot.botState.direction: ", bot.botState.direction
@@ -149,8 +193,13 @@ proc handleMessage(bot:Bot, json_message:string) =
         bot.onWonRound(fromJson($event, WonRoundEvent))     
       else:
         echo "NOT HANDLED BOT TICK EVENT: ", event
+
+      # # check the custom coditions
+      # for customCondition in customConditions:
+      #   echo "checking custom condition: ", customCondition.name, " for bot: ", bot.name, " with value: ", customCondition.test(bot)
+      #   if customCondition.test(bot):
+      #     bot.onCustomCondition(customCondition.name)
     
-    # send intent
   of gameAbortedEvent:
     stop bot
 
@@ -191,6 +240,9 @@ proc handleMessage(bot:Bot, json_message:string) =
 
   else: echo "NOT HANDLED MESSAGE: ",json_message
 
+  stdout.write("-")
+  stdout.flushFile
+
 proc botWorker(bot:Bot) {.thread.} =
   bot.botReady = true
   echo "[",bot.name,".botWorker] READY!"
@@ -225,7 +277,8 @@ proc botWorker(bot:Bot) {.thread.} =
         echo "[",bot.name,".botWorker] automatic GO started"
         # Third, when the bot creator's 'run()' exits, if the bot is still runnning, we send the intent automatically
         while isRunning(bot):
-          go bot
+          if not botLocked:
+            go bot
 
         echo "[",bot.name,".botWorker] automatic GO ended"
 
@@ -267,6 +320,9 @@ proc conectionHandler(bot:Bot) {.async.} =
 
         if packet.isEmptyOrWhitespace(): continue
 
+        stdout.write("+")
+        stdout.flushFile
+
         handleMessage(bot, packet)
 
     # start a async fiber thingy
@@ -294,9 +350,11 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
   bot.initialPosition = position
 
   initLock messagesSeqLock
+  initLock customConditionsLock
 
   # init channels
   botWorkerChan.open()
+  customConditionsWorkerChan.open()
   # sendMessage_channel.open()
 
   # connect to the Game Server
@@ -307,12 +365,14 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
     if bot.serverConnectionURL == "": 
       bot.serverConnectionURL = getEnv("SERVER_URL", "ws://localhost:7654")
 
-    # runners for the 3 main threads
+    # runners for the botWorker and customConditionsWorker
     var
       botRunner: Thread[bot.type]
+      customConditionsRunner: Thread[bot.type]
 
     # create the threads
     createThread botRunner, botWorker, bot
+    createThread customConditionsRunner, customConditionsWorker, bot
 
     # wait for the threads to be ready
     echo "[",bot.name,".startBot] waiting for bot and intent threads to be ready"
@@ -323,11 +383,13 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
     waitFor conectionHandler bot
 
     # Waiting for the bot thread to finish
-    joinThreads botRunner
+    joinThreads botRunner, customConditionsRunner
 
   deinitLock messagesSeqLock
+  deinitLock customConditionsLock
   # close channels
   botWorkerChan.close()
+  customConditionsWorkerChan.close()
   # sendMessage_channel.close()
     
   echo "[",bot.name,".startBot]connection ended and bot thread finished. Bye!"

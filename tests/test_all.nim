@@ -26,7 +26,7 @@ var
   serverConnectionURL:string = "ws://localhost:"&port
 
 let
-  assets_version = "0.21.0"
+  assets_version = "0.22.0"
   botSecret = "testBotSecret"
   controllerSecret = "testControllerSecret"
   possible_actions = @["turnLeft", "turnRight", "turnGunLeft", "turnGunRight", "turnRadarLeft", "turnRadarRight", "forward", "back"]

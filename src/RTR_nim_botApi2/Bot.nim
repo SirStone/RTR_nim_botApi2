@@ -3,6 +3,11 @@ import jsony
 import Schemas
 
 type
+  # Condition object for custom conditons
+  Condition* = ref object of RootObj
+    name*: string # the condition name
+    test*: proc (bot:Bot):bool # the condition function
+
   BluePrint = ref object of RootObj
     # filled from JSON
     name*:string = "BluePrint"
@@ -70,12 +75,14 @@ method onDeath*(bot:BluePrint, botDeathEvent:BotDeathEvent) {.base gcsafe.} =  d
 method onConnect*(bot:BluePrint) {.base gcsafe.} = discard
 method onConnectionError*(bot:BluePrint, error:string) {.base gcsafe.} = discard
 method onWonRound*(bot:BluePrint, wonRoundEvent:WonRoundEvent) {.base gcsafe.} = discard
+method onCustomCondition*(bot:BluePrint, name:string) {.base gcsafe.} = discard
 
 #++++++++ system variables ++++++++#
-var botLocked:bool = false
+var botLocked*:bool = false
 var lastbotIntentTurn:int = -1
 var messagesSeqLock*:Lock
-# var sendMessage_channel*:Channel[string]
+var customConditionsLock*:Lock
+var customConditions* = newSeq[Condition]()
 
 #++++++++ GAME PHYSICS ++++++++#
 # bots accelerate at the rate of 1 unit per turn but decelerate at the rate of 2 units per turn
@@ -163,7 +170,6 @@ proc start*(bot:Bot) =
 
 proc go*(bot:Bot) =
   sleep(1)
-
   # Sending intent to server if the last turn we sent it is different from the current turn
   if bot.turnNumber == lastbotIntentTurn: return
 
@@ -178,6 +184,11 @@ proc go*(bot:Bot) =
 
   # reset the intent for the next turn
   resetIntent bot
+
+#++++++++ BOT HEALTH ++++++++#
+proc getEnergy*(bot:Bot):float =
+  ## returns the current energy of the bot
+  return bot.botState.energy
 
 #++++++++ BOT SETUP +++++++++#
 proc setAdjustGunForBodyTurn*(bot:Bot, adjust:bool) =
@@ -367,6 +378,10 @@ proc getRadarTurnRemaining*(bot:Bot):float =
 proc getRadarDirection*(bot:Bot):float =
   ## returns the current radar direction in degrees
   return bot.botState.radarDirection
+
+proc getMaxRadarTurnRate*(bot:Bot):float =
+  ## returns the maximum turn rate of the radar in degrees
+  return MAX_RADAR_TURN_RATE
 
 proc setRescan*(bot:Bot) =
   ## set the radar to rescan if the bot is not locked doing a blocking call
@@ -582,6 +597,14 @@ proc setDistanceRemaining*(bot:Bot, distance:float) =
   ## **OVERRIDES CURRENT VALUE**
   remaining_distance = distance
 
+proc getAcceleration*(bot:Bot):float =
+  ## returns the acceleration of the bot
+  return ACCELERATION
+
+proc getDeceleration*(bot:Bot):float =
+  ## returns the deceleration of the bot
+  return DECELERATION
+
 #++++++++++++++ FIRE! ++++++++++++++#
 proc setFire*(bot:Bot, firepower:float):bool =
   ## set the firepower of the next shot if the bot is not locked doing a blocking call
@@ -595,7 +618,15 @@ proc setFire*(bot:Bot, firepower:float):bool =
     return false # cannot fire yet
   else:
     bot.intent.firePower = firepower
-    return true 
+    return true
+
+proc getMaxFirePower*(bot:Bot):float =
+  ## returns the maximum firepower
+  return MAX_FIRE_POWER
+
+proc getMinFirePower*(bot:Bot):float =
+  ## returns the minimum firepower
+  return MIN_FIRE_POWER
 
 proc fire*(bot:Bot, firepower:float) =
   ## fire a shot with `firepower` if the bot is not locked doing another blocking call

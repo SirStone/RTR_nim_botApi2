@@ -1,6 +1,6 @@
 {
-    "name": "Walls NIM",
-    "version": "1.0.0",
+    "name": "Target NIM",
+    "version": "0.1.0",
     "gameTypes": [
         "melee",
         "classic",
@@ -9,7 +9,7 @@
     "authors": [
         "SirStone"
     ],
-    "description": "replica of the original Walls, computed in Nim",
+    "description": "replica of the original Target, computed in Nim",
     "homepage": "",
     "countryCodes": [
         "it"
