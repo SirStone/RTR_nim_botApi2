@@ -4,7 +4,7 @@ startBot newBot("Crazy.json") # start the bot
 # --------------end, the rest is up to you--------------
 
 ## ------------------------------------------------------------------
-## Target NIM
+## Crazy NIM
 ## ------------------------------------------------------------------
 ##
 ## This bot moves around in a crazy pattern.
