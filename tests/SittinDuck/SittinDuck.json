@@ -1,0 +1,19 @@
+{
+    "name": "SittinDuck",
+    "version": "1.3.0",
+    "gameTypes": [
+        "melee",
+        "classic",
+        "1v1"
+    ],
+    "authors": [
+        "SirStone"
+    ],
+    "description": "Utility bot for testing. It's purpose is to stay where is put and not move or shoot",
+    "homepage": "",
+    "countryCodes": [
+        "it"
+    ],
+    "platform": "Linux/Windows/Mac",
+    "programmingLang": "NIM"
+}
