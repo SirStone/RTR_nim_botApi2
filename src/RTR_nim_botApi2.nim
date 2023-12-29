@@ -161,20 +161,20 @@ proc updateRemainings() =
 proc go*() =
   ## **Send the bot intent**
   
-  # we send the intent once per turn
+  last_turn_we_sent_intent = turnNumber
+
+  # update the remainings
+  updateRemainings()
+
+  stdout.write("-")
+  stdout.flushFile()
+
+  waitFor sendMsg toJson botIntent
+
+  # wait for the next turn
   while turnNumber == last_turn_we_sent_intent and running:
-    asyncCheck sleepAsync(1) # to make the dispatcher happy
-  
-  if running:
-    last_turn_we_sent_intent = turnNumber
+    waitFor sleepAsync(1) # to make the dispatcher happy
 
-    # update the remainings
-    updateRemainings()
-
-    stdout.write("-")
-    stdout.flushFile()
-
-    waitFor sendMsg toJson botIntent
 #++++++++ END BOT INTENT ++++++++#
 
 #++++++++ BOT HIT BOT EVENT ++++++++#
