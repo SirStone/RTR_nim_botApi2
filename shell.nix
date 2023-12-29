@@ -4,8 +4,10 @@ let
 in
 stable.mkShell {
   nativeBuildInputs = [ 
-    unstable.buildPackages.nim2
-    unstable.buildPackages.nimPackages.nimble
-    stable.openjdk
+    stable.nim2
+    unstable.nimble
+    stable.jdk
+    stable.valgrind
+    stable.gdb
   ];
 }
