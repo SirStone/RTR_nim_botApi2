@@ -158,9 +158,8 @@ proc updateRemainings() =
   # echo "remaining_distance: ", remaining_distance, " remaining_turnRate: ", remaining_turnRate, " remaining_turnGunRate: ", remaining_turnGunRate, " remaining_turnRadarRate: ", remaining_turnRadarRate
 
 #++++++++ BOT INTENT ++++++++#
-proc go*() =
+proc execute(botIntent:BotIntent) =
   ## **Send the bot intent**
-  
   last_turn_we_sent_intent = turnNumber
 
   # update the remainings
@@ -174,6 +173,9 @@ proc go*() =
   # wait for the next turn
   while turnNumber == last_turn_we_sent_intent and running:
     waitFor sleepAsync(1) # to make the dispatcher happy
+
+proc go*() =
+  execute(botIntent)
 
 #++++++++ END BOT INTENT ++++++++#
 
@@ -372,7 +374,7 @@ proc turnRadarLeft*(degrees:float) =
 
     # go until the bot is not running or the remaining_turnRadarRate is 0
     while isRunning() and remaining_turnRadarRate != 0:
-      go()
+      execute(botIntent)
 
     # unlock the bot
     botLocked = false
@@ -448,7 +450,7 @@ proc turnGunLeft*(degrees:float) =
 
     # go until the bot is not running or the remaining_turnGunRate is 0
     while isRunning() and remaining_turnGunRate != 0:
-      go()
+      execute(botIntent)
 
     # unlock the bot
     botLocked = false
@@ -511,7 +513,7 @@ proc turnLeft*(degrees:float) =
 
     # go until the bot is not running or the remaining_turnRate is 0
     while isRunning() and remaining_turnRate != 0:
-      go()
+      execute(botIntent)
 
     # unlock the bot
     botLocked = false
@@ -590,7 +592,7 @@ proc forward*(distance:float) =
 
     # go until the bot is not running or the remaining_turnRate is 0
     while isRunning() and remaining_distance != 0:
-      go()
+      execute(botIntent)
 
     # unlock the bot
     botLocked = false
@@ -660,7 +662,7 @@ proc fire*(firepower:float) =
   # if not botLocked:
   #   botLocked = true
   if setFire(firepower):
-    go()
+    execute(botIntent)
     # botLocked = false
 
 proc setFireAssist*(enable:bool) =
@@ -886,6 +888,35 @@ proc handleMessage(json_message:string) {.async.} =
 
   else: echo "NOT HANDLED MESSAGE: ",json_message
 
+proc botRunner(bot:Bot, botIntent:BotIntent) {.thread.} =
+  # the connections is still not established here, lets wait for the signal
+  while true:
+    var msg = chan.recv()
+    case msg:
+    of "connected":
+      echo "[processor] aknowledged connection"
+
+      # wait for the bot to be ready to run
+      while connected:
+        msg = chan.recv()
+        case msg:
+        of "run":
+          echo "[processor] run command received"
+          # first we run the custom bot method
+          run bot
+
+          # after we send the intent automatically
+          while isRunning() and connected:
+            execute(botIntent)
+        else:
+          echo "[processor] unhandled message 2: ", msg
+
+    of "abort":
+      echo "[processor] aborting..."
+      return
+    else:
+      echo "[processor] unhandled message 1: ", msg
+
 proc communications() {.async.} =
   while wsg.readyState == Open:
     let msg = await wsg.receiveStrPacket()
@@ -894,53 +925,25 @@ proc communications() {.async.} =
     
     await handleMessage(msg)
 
-proc processor() {.async.} =
-  # the connections is still not established here, lets wait for the signal
-  while true:
-    var msg = chan.tryRecv()
-    if msg.dataAvailable:
-      case msg.msg:
-      of "connected":
-        echo "[processor] aknowledged connection"
-
-        # wait for the bot to be ready to run
-        while connected:
-          msg = chan.tryRecv()
-          if msg.dataAvailable:
-            case msg.msg:
-            of "run":
-              echo "[processor] run command received"
-              # first we run the custom bot method
-              run bot
-
-              # after we send the intent automatically
-              while isRunning() and connected:
-                go()
-            else:
-              echo "[processor] unhandled message 2: ", msg
-          else:
-            await sleepAsync(1)
-
-      of "abort":
-        echo "[processor] aborting..."
-      else:
-        echo "[processor] unhandled message 1: ", msg
-        return
-    else:
-      await sleepAsync(1)
-
-proc startEngine() {.async.} =
+proc startComms() {.async.} =
   try:
     wsg = await newWebSocket(serverConnectionURL)
 
-    # start the bot processor
-    asyncCheck processor()
-
     # start the communication interface
-    waitFor communications()
+    await communications()
   except Exception as e:
     echo "[startEngine] error: ", e.msg
-  
+
+proc start() =
+  # start the bot runner
+  var botThread:Thread[Bot]
+  createThread botThread, botRunner, bot
+
+  # open the connection and start listening
+  waitFor startComms()
+
+  joinThread botThread
+
 proc newBot(json_file: string): Bot =
   # read the config file from disk
   try:
@@ -973,9 +976,6 @@ proc startBot*(json_file:string, connect:bool = true, position:InitialPosition =
   # set the initial position, is the server that will decide to use it or not
   initialPosition = position
 
-  # open channels
-  open chan
-
   # connect to the Game Server
   if(connect):
     if secret == "":
@@ -984,9 +984,7 @@ proc startBot*(json_file:string, connect:bool = true, position:InitialPosition =
     if serverConnectionURL == "": 
       serverConnectionURL = getEnv("SERVER_URL", "ws://localhost:7654")
 
-    # start the engine of the bot
-    waitFor startEngine()
+    # start the sysem
+    start()
 
-  # close channels
-  close chan
   echo "[startBot] bot is powered off. Bye!"
