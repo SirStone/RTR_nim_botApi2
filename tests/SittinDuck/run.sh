@@ -19,7 +19,7 @@ while getopts 'u:s:' flag; do
 done
 
 # Remove the extension from the file name
-bot_name="TestBot"
+bot_name="SittinDuck"
 
 nim c --run $script_dir/$bot_name.nim
 rm $script_dir/$bot_name
