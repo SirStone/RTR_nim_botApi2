@@ -1,5 +1,5 @@
 # import 3rd party libraries
-import jsony, json
+import json
 
 type
   Type* = enum
@@ -21,7 +21,9 @@ type
     bulletFiredEvent = "BulletFiredEvent"
     bulletHitBotEvent = "BulletHitBotEvent"
     bulletHitBulletEvent = "BulletHitBulletEvent"
+    connectedEvent = "ConnectedEvent"
     controllerHandshake = "ControllerHandshake"
+    disconnectedEvent = "DisconnectedEvent"
     bulletHitWallEvent = "BulletHitWallEvent"
     hitByBulletEvent = "HitByBulletEvent"
     gameStartedEventForObserver = "GameStartedEventForObserver"
@@ -180,12 +182,21 @@ type
     direction*: float #Direction in degrees
     color*: string #Color of the bullet
 
+  ConnectedEvent* = ref object of Event
+    serverUri*:string #The URI of the server
+
   ControllerHandshake* = ref object of Schema
     sessionId*: string #Unique session id that must match the session id received from the server handshake.
     name*: string #Name of the controller
     version*: string #Version of the controller
     author*: string #Author of the controller
     secret*: string #Secret used for access control with the server
+
+  DisconnectedEvent* = ref object of Event
+    serverUri*:string #The URI of the server
+    remote*:bool #Flag indicating if the disconnection was initiated by the remote server
+    statusCode*:int #The status code of the disconnection
+    reason*:string #The reason for the disconnection
 
   GameSetup* = ref object of RootObj
     gameType*: string #Type of game
@@ -301,74 +312,3 @@ type
     events*: seq[Event] #All events occurring at this tick
 
   WonRoundEvent* = ref object of Event
-
-proc schema2json*(schema:Schema):string =
-  result = schema.toJson
-
-proc json2schema*(json_message:string):Schema =
-  let `type` = json_message.fromJson(Schema).`type`
-  case `type`:
-  of Type.botHandshake:
-    result = json_message.fromJson(BotHandshake)
-  of Type.botIntent:
-    result = json_message.fromJson(BotIntent)
-  of Type.botReady:
-    result = json_message.fromJson(BotReady)
-  of Type.gameStartedEventForBot:
-    result = json_message.fromJson(GameStartedEventForBot)
-  of Type.gameEndedEventForBot:
-    result = json_message.fromJson(GameEndedEventForBot)
-  of Type.gameEndedEventForObserver:
-    result = json_message.fromJson(GameEndedEventForObserver)
-  of Type.gameAbortedEvent:
-    result = json_message.fromJson(GameAbortedEvent)
-  of Type.roundStartedEvent:
-    result = json_message.fromJson(RoundStartedEvent)
-  of Type.roundEndedEvent:
-    result = json_message.fromJson(RoundEndedEventForBot)
-  of Type.roundEndedEventForBot:
-    result = json_message.fromJson(RoundEndedEventForBot)
-  of Type.botDeathEvent:
-    result = json_message.fromJson(BotDeathEvent)
-  of Type.botHitBotEvent:
-    result = json_message.fromJson(BotHitBotEvent)
-  of Type.botHitWallEvent:
-    result = json_message.fromJson(BotHitWallEvent)
-  of Type.botInfo:
-    result = json_message.fromJson(BotInfo)
-  of Type.botListUpdate:
-    result = json_message.fromJson(BotListUpdate)
-  of Type.bulletFiredEvent:
-    result = json_message.fromJson(BulletFiredEvent)
-  of Type.bulletHitBotEvent:
-    result = json_message.fromJson(BulletHitBotEvent)
-  of Type.bulletHitBulletEvent:
-    result = json_message.fromJson(BulletHitBulletEvent)
-  of Type.controllerHandshake:
-    result = json_message.fromJson(ControllerHandshake)
-  of Type.bulletHitWallEvent:
-    result = json_message.fromJson(BulletHitWallEvent)
-  of Type.hitByBulletEvent:
-    result = json_message.fromJson(HitByBulletEvent)
-  of Type.gameStartedEventForObserver:
-    result = json_message.fromJson(GameStartedEventForObserver)
-  of Type.roundEndedEventForObserver:
-    result = json_message.fromJson(RoundEndedEventForObserver)
-  of Type.scannedBotEvent:
-    result = json_message.fromJson(ScannedBotEvent)
-  of Type.serverHandshake:
-    result = json_message.fromJson(ServerHandshake)
-  of Type.skippedTurnEvent:
-    result = json_message.fromJson(SkippedTurnEvent)
-  of Type.startGame:
-    result = json_message.fromJson(StartGame)
-  of Type.stopGame:
-    result = json_message.fromJson(StopGame)
-  of Type.tickEventForBot:
-    result = json_message.fromJson(TickEventForBot)
-  of Type.tickEventForObserver:
-    result = json_message.fromJson(TickEventForObserver)
-  of Type.wonRoundEvent:
-    result = json_message.fromJson(WonRoundEvent)
-  else:
-    result = nil

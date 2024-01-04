@@ -21,5 +21,6 @@ done
 # Remove the extension from the file name
 bot_name="VelocityBot"
 
-nim c -d:release -d:danger --run $script_dir/$bot_name.nim
+# nim c -d:release -d:danger --run $script_dir/$bot_name.nim
+nim c --run $script_dir/$bot_name.nim
 rm $script_dir/$bot_name
