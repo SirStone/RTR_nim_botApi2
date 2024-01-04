@@ -4,7 +4,7 @@ startBot newBot("SittinDuck.json") # start the bot
 # --------------end, the rest is up to you--------------
 
 method run(bot:Bot) =
-  echo "[",bot.name,"] run started, running for"
+  echo "[",bot.name,"] run started"
 
   bot.setBodyColor("#32CD32")
   bot.setGunColor("#32CD32")

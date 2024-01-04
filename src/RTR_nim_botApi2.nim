@@ -1,367 +1,233 @@
 import std/[os, locks, strutils, math]
 import ws, jsony, json, asyncdispatch
-import RTR_nim_botApi2/[Schemas, Bot]
+import RTR_nim_botApi2/[Schemas, Bot, Statics, Utils]
 
 export Schemas, Bot, Condition
 
-# globals
-var botWorkerChan:Channel[string]
-var customConditionsWorkerChan:Channel[string]
-var waitForWorkerChan:Channel[string]
-var skipped = 0
+var
+  writerChannel:Channel[string]
+  botChannel:Channel[string]
+  nextTurnChannel:Channel[bool]
 
-# proc to b eused as logging stuff in the stdout
-proc log*(bot:Bot, msg:string) =
-  stdout.writeLine "[" & bot.name & ".log] " & msg
-  stdout.flushFile
+  #++++++++++++++ MAX RATES ++++++++++++++#
+  max_turnRate:float = MAX_TURN_RATE
+  max_gunTurnRate:float = MAX_GUN_TURN_RATE
+  max_radarTurnRate:float = MAX_RADAR_TURN_RATE
 
-proc console_log*(bot:Bot, msg:string) =
-  stdout.writeLine msg
-  stdout.flushFile
-  bot.intent.stdOut.add(msg)
+  #++++++++ REMAININGS ++++++++#
+  remaining_turnRate:float = 0
+  remaining_turnGunRate:float = 0
+  remaining_turnRadarRate:float = 0
+  remaining_distance:float = 0
 
-proc setConnectionParameters*(bot:Bot, serverConnectionURL:string, secret:string) =
-  ## **Set the connection parameters**
-  ## 
-  ## This method is used to set the connection parameters for the bot to connect to the game server.
-  ## 
-  ## `serverConnectionURL` is the url of the game server
-  ## 
-  ## `secret` is the secret required by the server to connect
-  ## 
-  ## Example:
-  ## 
-  ## ```nim
-  ## setConnectionParameters("ws://localhost:1234", "botsecretcode")
-  ## ```
-  ## 
-  ## This method is optional. If not called the bot will use the default values of `ws://localhost` and `7654`
-  ## 
-  ## This method must be called before `startBot()`
-  ## 
-  ## This method is mostly used for testing
-  bot.serverConnectionURL = serverConnectionURL
-  bot.secret = secret
+  #++++++++ BOT UPDATES ++++++++#
+  turnRate_done*:float = 0
+  gunTurnRate_done*:float = 0
+  radarTurnRate_done*:float = 0
+  distance_done*:float = 0
 
-proc addCustomCondition*(bot:Bot, name:string, test:proc (bot:Bot):bool) {.gcsafe.} =
-  ## add a custom condition to the bot
-  ## 
-  ## `name` is the name of the condition
-  ## `test` is the function that will be called to test the condition
-  {.locks: [customConditionsLock] gcsafe.}: customConditions.add(Condition(name: name, test: test))
+proc updateGunTurnRate(bot:Bot) = discard
+proc updateRadarTurnRate(bot:Bot) = discard
+proc updateTurnRate(bot:Bot) = discard
+proc updateSpeed(bot:Bot) = discard     
 
-# proc to run a custom codition in different thread
-proc customConditionsWorker(bot:Bot) {.thread.} =
-  # While the bot is connected to the server the bot thread should live
-  var msg = customConditionsWorkerChan.recv()
+proc updateIntentRates(bot:Bot) =
+  updateGunTurnRate(bot)
+  updateRadarTurnRate(bot)
+  updateTurnRate(bot)
+  updateSpeed(bot)
 
-  case msg:
-  of "QUIT":
-    return
-  else:
-    while bot.connected:
-      # First is waiting doing nothing for the bot to be in running state
-      let msg = customConditionsWorkerChan.recv()
+proc go*(bot:Bot) =
+  updateIntentRates(bot)
 
-      case msg:
-      of "QUIT":
-        return
-      else:
-        while isRunning(bot) and bot.connected:
-          # check the custom coditions
-          {.locks: [customConditionsLock] gcsafe.}:
-            for customCondition in customConditions:
-                if customCondition.test(bot):
-                  bot.onCustomCondition(customCondition.name)
-          sleep 1
+  writerChannel.send(bot.intent.toJson())
 
-proc handleMessage(bot:Bot, json_message:string) =
-  # Convert the json to a Message object
-  let message = json2schema json_message
+  stdout.write "-"
+  stdout.flushFile()
 
-  # 'case' switch over type
-  case message.`type`:
-  of serverHandshake:
-    let server_handshake = (ServerHandshake)message
-    let bot_handshake = BotHandshake(`type`:Type.botHandshake, sessionId:server_handshake.sessionId, name:bot.name, version:bot.version, authors:bot.authors, secret:bot.secret, initialPosition:bot.initialPosition)
-    {.locks: [messagesSeqLock].}: bot.messagesToSend.add(bot_handshake.toJson)
-    # sendMessage_channel.send(bot_handshake.toJson)
-    
-    # signal the threads that the connection is ready
-    bot.connected = true
-    botWorkerChan.send("connected")
-    customConditionsWorkerChan.send("connected")
+  while bot.connected and bot.running:
+    let isNextTurn = nextTurnChannel.recv()
+    if isNextTurn: return
 
-  of gameStartedEventForBot:
-    let game_started_event_for_bot = (GameStartedEventForBot)message
+#++++++++++++++ CALLABLES ++++++++++++++#
+proc setGunTurnRate*(bot:Bot, rate:float) =
+  bot.intent.gunTurnRate = rate
+  remaining_turnGunRate = toInfiniteValue(rate)
 
-    # store the Game Setup for the bot usage
-    bot.gameSetup = game_started_event_for_bot.gameSetup
-    bot.myId = game_started_event_for_bot.myId
+proc setRadarTurnRate*(bot:Bot, rate:float) =
+  bot.intent.radarTurnRate = rate
+  remaining_turnRadarRate = toInfiniteValue(rate)
 
-    # activating the bot method
-    bot.onGameStarted(game_started_event_for_bot)
-    
-    # send bot ready
-    {.locks: [messagesSeqLock].}: bot.messagesToSend.add(BotReady(`type`:Type.botReady).toJson)
-    # sendMessage_channel.send(BotReady(`type`:Type.botReady).toJson)
+proc setTurnRate*(bot:Bot, rate:float) =
+  bot.intent.turnRate = rate
+  remaining_turnRate = toInfiniteValue(rate)
 
-  of tickEventForBot:
-    let tick_event_for_bot = (TickEventForBot)message
+proc fire*(bot:Bot, power:float) =
+  bot.intent.firePower = clamp(power, MIN_FIRE_POWER, MAX_FIRE_POWER)
+  go bot
 
-    if bot.first_tick:
-      # Start the bot
-      start bot
+proc handleServerHandshake(bot:Bot, msg:string) {.async.} =
+  let server_handshake = msg.fromJson(ServerHandshake)
+  let bot_handshake = BotHandshake(`type`:Type.botHandshake, sessionId:server_handshake.sessionId, name:bot.name, version:bot.version, authors:bot.authors, secret:bot.secret, initialPosition:bot.initialPosition)
+  writerChannel.send(bot_handshake.toJson())
 
-      turnRate_done = 0
-      gunTurnRate_done = 0
-      radarTurnRate_done = 0
-      distance_done = 0
+proc handleGameStartedEventForBot(bot:Bot, packet:string) {.async.} =
+  let gameStartedEventForBot = packet.fromJson(GameStartedEventForBot)
+  bot.myId = gameStartedEventForBot.myId
+  bot.gameSetup = gameStartedEventForBot.gameSetup
+  writerChannel.send(BotReady(`type`:Type.botReady).toJson)
 
-      # notify the bot that the round is started
-      botWorkerChan.send("running")
-      customConditionsWorkerChan.send("running")
+proc handleRoundStartedEventForBot(bot:Bot, packet:string) =
+  let roundStartedEvent = packet.fromJson(RoundStartedEvent)
+  bot.onRoundStarted(roundStartedEvent)
+  bot.running = true
+  botChannel.send("run")
+
+proc handleBotDeathEvent(bot:Bot, packet:string) =
+  let botDeathEvent = packet.fromJson(BotDeathEvent)
+  bot.onDeath(botDeathEvent)
+  bot.running = false
+
+proc handleBotHitWallEvent(bot:Bot, packet:string) =
+  let botHitWallEvent = packet.fromJson(BotHitWallEvent)
+  bot.onHitWall(botHitWallEvent)
+
+proc handleBotHitBotEvent(bot:Bot, packet:string) =
+  let botHitBotEvent = packet.fromJson(BotHitBotEvent)
+  bot.onHitBot(botHitBotEvent)
+
+proc handleBulletFiredEvent(bot:Bot, packet:string) =
+  let bulletFiredEvent = packet.fromJson(BulletFiredEvent)
+  bot.onBulletFired(bulletFiredEvent)
+
+proc handleBulletHitBotEvent(bot:Bot, packet:string) =
+  let bulletHitBotEvent = packet.fromJson(BulletHitBotEvent)
+  bot.onBulletHitBot(bulletHitBotEvent)
+
+proc handleBulletHitWallEvent(bot:Bot, packet:string) =
+  let bulletHitWallEvent = packet.fromJson(BulletHitWallEvent)
+  bot.onBulletHitWall(bulletHitWallEvent)
+
+proc handleHitByBullet(bot:Bot, packet:string) =
+  let hitByBulletEvent = packet.fromJson(HitByBulletEvent)
+  bot.onHitByBullet(hitByBulletEvent)
+
+proc handleScannedBotEvent(bot:Bot, packet:string) =
+  let scannedBotEvent = packet.fromJson(ScannedBotEvent)
+  bot.onScannedBot(scannedBotEvent)
+
+proc handleWonRoundEvent(bot:Bot, packet:string) =
+  let wonRoundEvent = packet.fromJson(WonRoundEvent)
+  bot.onWonRound(wonRoundEvent)
+
+proc handleTickEvent(bot:Bot, packet:string) =
+  nextTurnChannel.send(true)
+  bot.tickEvent = packet.fromJson(TickEventForBot)
+  bot.onTick(bot.tickEvent)
+
+  # for every event inside this tick call the relative event for the bot
+  for event in bot.tickEvent.events:
+    case parseEnum[Type](event["type"].getStr()):
+    of Type.botDeathEvent: handleBotDeathEvent(bot, $event)
+    of Type.botHitWallEvent: handleBotHitWallEvent(bot, $event)
+    of Type.botHitBotEvent: handleBotHitBotEvent(bot, $event)
+    of Type.bulletFiredEvent: handleBulletFiredEvent(bot, $event)
+    of Type.bulletHitBotEvent: handleBulletHitBotEvent(bot, $event)
+    of Type.bulletHitWallEvent: handleBulletHitWallEvent(bot, $event)
+    of Type.hitByBulletEvent: handleHitByBullet(bot, $event)
+    of Type.scannedBotEvent: handleScannedBotEvent(bot, $event)
+    of Type.wonRoundEvent: handleWonRoundEvent(bot, $event)
+    else: echo "unknown event type: " & $event["type"].getStr()
+
+  stdout.write "+"
+
+proc handleSkippedTurnEvent(bot:Bot, packet:string) =
+  let skippedTurnEvent = packet.fromJson(SkippedTurnEvent)
+  bot.onSkippedTurn(skippedTurnEvent)
+
+  stdout.write("!")
+  stdout.flushFile()
+
+proc handleRoundEndedEventForBot(bot:Bot, packet:string) =
+  let roundEndedEventForBot = packet.fromJson(RoundEndedEventForBot)
+  bot.onRoundEnded(roundEndedEventForBot)
+  bot.running = false
+
+proc handleGameAbortedEvent(bot:Bot, packet:string) =
+  let gameAbortedEvent = packet.fromJson(GameAbortedEvent)
+  bot.onGameAborted(gameAbortedEvent)
+  bot.running = false
+
+proc handleGameEndedEventForBot(bot:Bot, packet:string) =
+  let gameEndedEventForBot = packet.fromJson(GameEndedEventForBot)
+  bot.onGameEnded(gameEndedEventForBot)
+  bot.running = false
+
+proc listen(bot:Bot, socket:WebSocket) {.async.} =
+  while socket.readyState == Open:
+    let msg = await socket.receiveStrPacket()
+    if msg.isEmptyOrWhitespace: continue
+
+    let `type` = msg.fromJson(Schema).`type`
+    case `type`:
+    of serverHandshake: await handleServerHandshake(bot, msg)
+    of gameStartedEventForBot: await handleGameStartedEventForBot(bot, msg)
+    of roundStartedEvent: handleRoundStartedEventForBot(bot, msg)
+    of tickEventForBot: handleTickEvent(bot, msg)
+    of skippedTurnEvent: handleSkippedTurnEvent(bot, msg)
+    of roundEndedEventForBot: handleRoundEndedEventForBot(bot, msg)
+    of gameAbortedEvent: handleGameAbortedEvent(bot, msg)
+    of gameEndedEventForBot: handleGameEndedEventForBot(bot, msg)
     else:
-      # if bot.name == "TEST BOT":
-      #   echo "tick_event_for_bot.botState.direction: ", tick_event_for_bot.botState.direction, " bot.botState.direction: ", bot.botState.direction
-      turnRate_done = tick_event_for_bot.botState.direction - bot.botState.direction
-      turnRate_done = (turnRate_done + 540) mod 360 - 180
+      echo "unknown packet type: " & $`type`
 
-      gunTurnRate_done = tick_event_for_bot.botState.gunDirection - bot.botState.gunDirection
-      gunTurnRate_done = (gunTurnRate_done + 540) mod 360 - 180
+proc write(bot:Bot, socket:WebSocket) {.async.} =
+  while socket.readyState == Open:
+    let data = writerChannel.tryRecv()
+    if not data.dataAvailable: await sleepAsync(1)
+    else: await socket.send(data.msg)
 
-      radarTurnRate_done = tick_event_for_bot.botState.radarDirection - bot.botState.radarDirection
-      radarTurnRate_done = (radarTurnRate_done + 540) mod 360 - 180
+proc connect(bot:Bot) {.thread.} =
+  var socket = waitFor newWebSocket(bot.serverConnectionURL)
+  bot.connected = true
+  bot.onConnect()
 
-      distance_done = tick_event_for_bot.botState.speed
+  asyncCheck listen(bot, socket)
+  asyncCheck write(bot, socket)
+  runForever()
 
-    bot.botState = tick_event_for_bot.botState
-    bot.turnNumber = tick_event_for_bot.turnNumber
-    bot.roundNumber = tick_event_for_bot.roundNumber
- 
-    # activating the bot method
-    bot.onTick(tick_event_for_bot)
+proc runBot(bot:Bot) {.thread.} =
+  echo "[runBot] is online"
+  while true:
+    let msg = botChannel.recv()
+    case msg:
+    of "run":
+      run bot
 
-    # for every event inside this tick call the relative event for the bot
-    for event in tick_event_for_bot.events:
-      case parseEnum[Type](event["type"].getStr()):
-      of Type.botDeathEvent:
-        # if the bot is dead we stop it
-        stop bot
+      while bot.running and bot.connected:
+        go bot
+    else: 
+      echo "[runBot] quit"
+      quit(0)
 
-        # Notifiy the bot that it is dead
-        bot.onDeath(fromJson($event, BotDeathEvent))
-      of Type.botHitWallEvent:
-        # stop bot movement
-        bot.setDistanceRemaining(0)
+proc startBot*(bot:Bot) =
+  writerChannel.open()
+  botChannel.open()
+  nextTurnChannel.open()
 
-        bot.onHitWall(fromJson($event, BotHitWallEvent))
-      of Type.bulletFiredEvent:
-        bot.intent.firePower = 0 # Reset firepower so the bot stops firing continuously
-        bot.onBulletFired(fromJson($event, BulletFiredEvent))
-      of Type.bulletHitBotEvent:
-        # conversion from BulletHitBotEvent to HitByBulletEvent
-        let hit_by_bullet_event = fromJson($event, HitByBulletEvent)
-        hit_by_bullet_event.`type` = Type.hitByBulletEvent
-        bot.onHitByBullet(hit_by_bullet_event)
-      of Type.bulletHitBulletEvent:
-        # conversion from BulletHitBulletEvent to HitBulletEvent
-        let bullet_hit_bullet_event = fromJson($event, BulletHitBulletEvent)
-        bullet_hit_bullet_event.`type` = Type.bulletHitBulletEvent
-        bot.onBulletHitBullet(bullet_hit_bullet_event)
-      of Type.bulletHitWallEvent:
-        # conversion from BulletHitWallEvent to HitWallByBulletEvent
-        let bullet_hit_wall_event = fromJson($event, BulletHitWallEvent)
-        bullet_hit_wall_event.`type` = Type.bulletHitWallEvent
-        bot.onBulletHitWall(bullet_hit_wall_event)
-      of Type.botHitBotEvent:
-        # stop bot movement
-        bot.setDistanceRemaining(0)
+  # secrets
+  bot.serverConnectionURL = getEnv("SERVER_URL", DEFAULT_SERVER_URL)
+  bot.secret = getEnv("SERVER_SECRET", DEFAULT_SERVER_SECRET)
 
-        bot.onHitBot(fromJson($event, BotHitBotEvent))
-      of Type.scannedBotEvent:
-        bot.onScannedBot(fromJson($event, ScannedBotEvent))
-      of Type.wonRoundEvent:
-        bot.onWonRound(fromJson($event, WonRoundEvent))     
-      else:
-        echo "NOT HANDLED BOT TICK EVENT: ", event
-    
-  of gameAbortedEvent:
-    stop bot
+  var
+    connectThread:Thread[bot.type]
+    botThread:Thread[bot.type]
 
-    let game_aborted_event = (GameAbortedEvent)message
+  createThread connectThread, connect, bot
+  createThread botThread, runBot, bot
 
-    # activating the bot method
-    bot.onGameAborted(game_aborted_event)
+  joinThreads connectThread, botThread
 
-  of gameEndedEventForBot:
-    stop bot
-
-    let game_ended_event_for_bot = (GameEndedEventForBot)message
-
-    # activating the bot method
-    bot.onGameEnded(game_ended_event_for_bot)
-
-  of skippedTurnEvent:
-    let skipped_turn_event = (SkippedTurnEvent)message
-    
-    # activating the bot method
-    bot.onSkippedTurn(skipped_turn_event)
-
-    skipped += 1
-
-  of roundEndedEventForBot:
-    stop bot
-
-    let round_ended_event_for_bot = json_message.fromJson(RoundEndedEventForBot)
-
-    # activating the bot method
-    bot.onRoundEnded(round_ended_event_for_bot)
-
-  of roundStartedEvent:
-    let round_started_event = (RoundStartedEvent)message
-
-    # activating the bot method
-    bot.onRoundStarted(round_started_event)
-
-  else: echo "NOT HANDLED MESSAGE: ",json_message
-
-proc botWorker(bot:Bot) {.thread.} =
-  bot.botReady = true
-
-  # While the bot is connected to the server the bot thread should live
-  var msg = botWorkerChan.recv()
-
-  case msg:
-  of "QUIT":
-    return
-  else:
-    while bot.connected:
-      # First is waiting doing nothing for the bot to be in running state
-      msg = botWorkerChan.recv()
-
-      case msg:
-      of "QUIT":
-        return
-      else:
-        # Second run the bot 'run()' method, the one scripted by the bot creator
-        # this could be going in loop until the bot is dead or could finish up quickly or could be that is not implemented at all
-        run bot
-
-        # Third, when the bot creator's 'run()' exits, if the bot is still runnning, we send the intent automatically
-        while isRunning(bot) and bot.connected:
-          go bot
-
-proc conectionHandler(bot:Bot) {.async.} =
-  try:
-    echo "[",bot.name,".conectionHandler] trying to connect to ", bot.serverConnectionURL
-    var ws = await newWebSocket(bot.serverConnectionURL)
-    echo "[",bot.name,".conectionHandler] connected..."
-
-    proc writer() {.async.} =
-      ## Loops while socket is open, looking for messages to write
-      while ws.readyState == Open:
-        # if there are chat message we have not sent yet
-        # send them
-        {.locks: [messagesSeqLock].}:
-          while bot.messagesToSend.len > 0:
-            let message = bot.messagesToSend.pop()
-            # echo "[API.writer.",bot.name,"] sending message: ", message, " for turn ", bot.turnNumber
-            await ws.send(message)
-
-        # keep the async stuff happy we need to sleep some times
-        await sleepAsync(1)
-
-    proc reader() {.async.} =
-      # Loops while socket is open, looking for messages to read
-      while ws.readyState == Open:
-        # this blocks
-        var packet = await ws.receiveStrPacket()
-
-        if packet.isEmptyOrWhitespace(): continue
-
-        handleMessage(bot, packet)
-
-    # start a async fiber thingy
-    asyncCheck writer()
-    await reader()
-
-  except CatchableError:
-    bot.onConnectionError(getCurrentExceptionMsg())
-    botWorkerChan.send("QUIT")
-    customConditionsWorkerChan.send("QUIT")
-
-proc timeout(bot:Bot, s:int) {.async.} =
-  await sleepAsync(s * 1000)
-  if(not bot.connected):
-    echo "timeout"
-    botWorkerChan.send("QUIT")
-    customConditionsWorkerChan.send("QUIT")
-
-
-proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialPosition(x:0,y:0,angle:0)) =
-  ## **Start the bot**
-  ## 
-  ## This method is used to start the bot instance. This coincide with asking the bot to connect to the game server
-  ## 
-  ## `bot` is the new and current bot istance
-  ## 
-  ## `connect` (can be omitted) is a boolean value that if `true` (default) will ask the bot to connect to the game server.
-  ## If `false` the bot will not connect to the game server. Mostly used for testing.
-  ## 
-  ## `position` (can be omitted) is the initial position of the bot. If not specified the bot will be placed at the center of the map.
-  ## This custom position will work if the server is configured to use the custom initial positions
-  
-  # set the initial position, is the server that will decide to use it or not
-  bot.initialPosition = position
-
-  initLock messagesSeqLock
-  initLock customConditionsLock
-
-  # init channels
-  botWorkerChan.open()
-  customConditionsWorkerChan.open()
-  waitForWorkerChan.open()
-  # sendMessage_channel.open()
-
-  # connect to the Game Server
-  if(connect):
-    if bot.secret == "":
-      bot.secret = getEnv("SERVER_SECRET", "serversecret")
-
-    if bot.serverConnectionURL == "": 
-      bot.serverConnectionURL = getEnv("SERVER_URL", "ws://localhost:7654")
-
-    # runners for the botWorker and customConditionsWorker
-    var
-      botRunner: Thread[bot.type]
-      customConditionsRunner: Thread[bot.type]
-
-    # create the threads
-    createThread botRunner, botWorker, bot
-    createThread customConditionsRunner, customConditionsWorker, bot
-
-    # wait for the threads to be ready
-    echo "[",bot.name,".startBot] waiting for bot and intent threads to be ready"
-    while not bot.botReady: sleep(100)
-    echo "[",bot.name,".startBot] bot threads are ready: ", bot.botReady
-
-    # start a timeout, in seconds, if the bot is not connected in time we quit
-    asyncCheck bot.timeout(10)
-
-    # connect to the server
-    waitFor conectionHandler bot
-
-    # Waiting for the bot thread to finish
-    joinThreads botRunner, customConditionsRunner
-
-  deinitLock messagesSeqLock
-  deinitLock customConditionsLock
-  # close channels
-  botWorkerChan.close()
-  customConditionsWorkerChan.close()
-  waitForWorkerChan.close()
-  # sendMessage_channel.close()
-    
-  echo "[",bot.name,".startBot]connection ended and bot thread finished. Bye!"
-  echo "[",bot.name,".startBot] skipped turns: ", skipped
+  writerChannel.close()
+  botChannel.close()
+  nextTurnChannel.close()
