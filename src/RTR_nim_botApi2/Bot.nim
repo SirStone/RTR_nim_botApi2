@@ -31,8 +31,7 @@ type
     first_tick*:bool = true # used to detect if the bot have been stated at first tick
 
     # usage during the games
-    running*:bool = false
-    connected*:bool = false
+    send*:string = ""
 
   Bot* = ref object of BluePrint
   
@@ -70,5 +69,3 @@ method onConnect*(bot:BluePrint) {.base gcsafe.} = discard
 method onConnectionError*(bot:BluePrint, error:string) {.base gcsafe.} = discard
 method onWonRound*(bot:BluePrint, wonRoundEvent:WonRoundEvent) {.base gcsafe.} = discard
 method onCustomCondition*(bot:BluePrint, name:string) {.base gcsafe.} = discard
-
-proc isRunning*(bot:Bot):bool = bot.running

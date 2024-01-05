@@ -1,13 +1,15 @@
-import std/[os, locks, strutils, math]
+import std/[os, locks, strutils, math, locks]
 import ws, jsony, json, asyncdispatch
 import RTR_nim_botApi2/[Schemas, Bot, Statics, Utils]
 
 export Schemas, Bot, Condition
 
 var
-  writerChannel:Channel[string]
   botChannel:Channel[string]
-  nextTurnChannel:Channel[bool]
+  masterLock:Lock
+  running {.guard: masterLock} :bool = false
+  connected {.guard: masterLock} :bool = false
+  nextTurn {.guard: masterLock} :bool = false
 
   #++++++++++++++ MAX RATES ++++++++++++++#
   max_turnRate:float = MAX_TURN_RATE
@@ -40,14 +42,15 @@ proc updateIntentRates(bot:Bot) =
 proc go*(bot:Bot) =
   updateIntentRates(bot)
 
-  writerChannel.send(bot.intent.toJson())
+  bot.send = bot.intent.toJson()
 
   stdout.write "-"
   stdout.flushFile()
 
-  while bot.connected and bot.running:
-    let isNextTurn = nextTurnChannel.recv()
-    if isNextTurn: return
+  withLock masterLock:
+    while connected and running:
+      if not nextTurn: sleep(1)
+      else: nextTurn = false
 
 #++++++++++++++ CALLABLES ++++++++++++++#
 proc setGunTurnRate*(bot:Bot, rate:float) =
@@ -64,29 +67,30 @@ proc setTurnRate*(bot:Bot, rate:float) =
 
 proc fire*(bot:Bot, power:float) =
   bot.intent.firePower = clamp(power, MIN_FIRE_POWER, MAX_FIRE_POWER)
+  echo "fire: " & $bot.intent.firePower
   go bot
 
 proc handleServerHandshake(bot:Bot, msg:string) {.async.} =
   let server_handshake = msg.fromJson(ServerHandshake)
   let bot_handshake = BotHandshake(`type`:Type.botHandshake, sessionId:server_handshake.sessionId, name:bot.name, version:bot.version, authors:bot.authors, secret:bot.secret, initialPosition:bot.initialPosition)
-  writerChannel.send(bot_handshake.toJson())
+  bot.send = bot_handshake.toJson()
 
 proc handleGameStartedEventForBot(bot:Bot, packet:string) {.async.} =
   let gameStartedEventForBot = packet.fromJson(GameStartedEventForBot)
   bot.myId = gameStartedEventForBot.myId
   bot.gameSetup = gameStartedEventForBot.gameSetup
-  writerChannel.send(BotReady(`type`:Type.botReady).toJson)
+  bot.send = BotReady(`type`:Type.botReady).toJson()
 
 proc handleRoundStartedEventForBot(bot:Bot, packet:string) =
   let roundStartedEvent = packet.fromJson(RoundStartedEvent)
   bot.onRoundStarted(roundStartedEvent)
-  bot.running = true
+  withLock masterLock: running = true
   botChannel.send("run")
 
 proc handleBotDeathEvent(bot:Bot, packet:string) =
   let botDeathEvent = packet.fromJson(BotDeathEvent)
   bot.onDeath(botDeathEvent)
-  bot.running = false
+  withLock masterLock: running = false
 
 proc handleBotHitWallEvent(bot:Bot, packet:string) =
   let botHitWallEvent = packet.fromJson(BotHitWallEvent)
@@ -121,7 +125,7 @@ proc handleWonRoundEvent(bot:Bot, packet:string) =
   bot.onWonRound(wonRoundEvent)
 
 proc handleTickEvent(bot:Bot, packet:string) =
-  nextTurnChannel.send(true)
+  withLock masterLock: nextTurn = true
   bot.tickEvent = packet.fromJson(TickEventForBot)
   bot.onTick(bot.tickEvent)
 
@@ -151,17 +155,17 @@ proc handleSkippedTurnEvent(bot:Bot, packet:string) =
 proc handleRoundEndedEventForBot(bot:Bot, packet:string) =
   let roundEndedEventForBot = packet.fromJson(RoundEndedEventForBot)
   bot.onRoundEnded(roundEndedEventForBot)
-  bot.running = false
+  withLock masterLock: running = false
 
 proc handleGameAbortedEvent(bot:Bot, packet:string) =
   let gameAbortedEvent = packet.fromJson(GameAbortedEvent)
   bot.onGameAborted(gameAbortedEvent)
-  bot.running = false
+  withLock masterLock: running = false
 
 proc handleGameEndedEventForBot(bot:Bot, packet:string) =
   let gameEndedEventForBot = packet.fromJson(GameEndedEventForBot)
   bot.onGameEnded(gameEndedEventForBot)
-  bot.running = false
+  withLock masterLock: running = false
 
 proc listen(bot:Bot, socket:WebSocket) {.async.} =
   while socket.readyState == Open:
@@ -183,13 +187,13 @@ proc listen(bot:Bot, socket:WebSocket) {.async.} =
 
 proc write(bot:Bot, socket:WebSocket) {.async.} =
   while socket.readyState == Open:
-    let data = writerChannel.tryRecv()
-    if not data.dataAvailable: await sleepAsync(1)
-    else: await socket.send(data.msg)
+    while bot.send.isEmptyOrWhitespace(): await sleepAsync(10)
+    await socket.send(bot.send)
+    bot.send = ""
 
 proc connect(bot:Bot) {.thread.} =
   var socket = waitFor newWebSocket(bot.serverConnectionURL)
-  bot.connected = true
+  withLock masterLock: connected = true
   bot.onConnect()
 
   asyncCheck listen(bot, socket)
@@ -203,17 +207,15 @@ proc runBot(bot:Bot) {.thread.} =
     case msg:
     of "run":
       run bot
-
-      while bot.running and bot.connected:
+    
+      while running and connected:
         go bot
     else: 
       echo "[runBot] quit"
       quit(0)
 
 proc startBot*(bot:Bot) =
-  writerChannel.open()
   botChannel.open()
-  nextTurnChannel.open()
 
   # secrets
   bot.serverConnectionURL = getEnv("SERVER_URL", DEFAULT_SERVER_URL)
@@ -228,6 +230,4 @@ proc startBot*(bot:Bot) =
 
   joinThreads connectThread, botThread
 
-  writerChannel.close()
   botChannel.close()
-  nextTurnChannel.close()

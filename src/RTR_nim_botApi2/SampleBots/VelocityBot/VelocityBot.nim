@@ -29,8 +29,8 @@ method run(bot:Bot) =
   #   go bot
 
 # We scanned another bot -> fire!
-# method onScannedBot(bot:Bot, event:ScannedBotEvent) =
-#   bot.fire(1)
+method onScannedBot(bot:Bot, event:ScannedBotEvent) =
+  bot.fire(1)
 
 # # We were hit by a bullet -> set turn rate
 # method onHitByBullet(bot:Bot, event:HitByBulletEvent) =
