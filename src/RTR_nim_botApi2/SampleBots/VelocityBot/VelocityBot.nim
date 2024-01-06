@@ -1,6 +1,6 @@
 # ----------------how to start a new bot----------------
 import ../../../RTR_nim_botApi2    # import the bot api
-startBot newBot("VelocityBot.json") # start the bot
+startBot("VelocityBot.json") # start the bot
 # --------------end, the rest is up to you--------------
 
 ## ------------------------------------------------------------------

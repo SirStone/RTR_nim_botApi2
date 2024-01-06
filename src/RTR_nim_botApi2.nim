@@ -1,15 +1,21 @@
-import std/[os, locks, strutils, math, locks]
+import std/[os, strutils]
 import ws, jsony, json, asyncdispatch
-import RTR_nim_botApi2/[Schemas, Bot, Statics, Utils]
+import RTR_nim_botApi2/[Schemas, BluePrints, Statics, Utils]
 
-export Schemas, Bot, Condition
+export Schemas, BluePrints
+
+type Bot* = ref object of BluePrint
+  eventsQueue:seq[Schema]
+  send:string = ""
+  running:bool = false
+  connected:bool = false
+  waiting:bool = false
 
 var
   botChannel:Channel[string]
-  masterLock:Lock
-  running {.guard: masterLock} :bool = false
-  connected {.guard: masterLock} :bool = false
-  nextTurn {.guard: masterLock} :bool = false
+  methodsChannel:Channel[string]
+  lastTurn:int = 0
+  firstTick:bool = true
 
   #++++++++++++++ MAX RATES ++++++++++++++#
   max_turnRate:float = MAX_TURN_RATE
@@ -28,6 +34,15 @@ var
   radarTurnRate_done*:float = 0
   distance_done*:float = 0
 
+proc waitForNextTurn(bot:Bot) =
+  bot.waiting = true
+  while bot.running and bot.connected:
+    if bot.tickEvent.turnNumber > lastTurn:
+      lastTurn = bot.tickEvent.turnNumber
+      break
+    else: waitFor sleepAsync(1)
+  bot.waiting = false
+
 proc updateGunTurnRate(bot:Bot) = discard
 proc updateRadarTurnRate(bot:Bot) = discard
 proc updateTurnRate(bot:Bot) = discard
@@ -40,17 +55,12 @@ proc updateIntentRates(bot:Bot) =
   updateSpeed(bot)
 
 proc go*(bot:Bot) =
+  if bot.waiting: return
   updateIntentRates(bot)
-
   bot.send = bot.intent.toJson()
-
-  stdout.write "-"
+  stdout.write("w")
   stdout.flushFile()
-
-  withLock masterLock:
-    while connected and running:
-      if not nextTurn: sleep(1)
-      else: nextTurn = false
+  waitForNextTurn(bot)
 
 #++++++++++++++ CALLABLES ++++++++++++++#
 proc setGunTurnRate*(bot:Bot, rate:float) =
@@ -67,138 +77,120 @@ proc setTurnRate*(bot:Bot, rate:float) =
 
 proc fire*(bot:Bot, power:float) =
   bot.intent.firePower = clamp(power, MIN_FIRE_POWER, MAX_FIRE_POWER)
-  echo "fire: " & $bot.intent.firePower
   go bot
 
-proc handleServerHandshake(bot:Bot, msg:string) {.async.} =
-  let server_handshake = msg.fromJson(ServerHandshake)
-  let bot_handshake = BotHandshake(`type`:Type.botHandshake, sessionId:server_handshake.sessionId, name:bot.name, version:bot.version, authors:bot.authors, secret:bot.secret, initialPosition:bot.initialPosition)
-  bot.send = bot_handshake.toJson()
-
-proc handleGameStartedEventForBot(bot:Bot, packet:string) {.async.} =
-  let gameStartedEventForBot = packet.fromJson(GameStartedEventForBot)
-  bot.myId = gameStartedEventForBot.myId
-  bot.gameSetup = gameStartedEventForBot.gameSetup
-  bot.send = BotReady(`type`:Type.botReady).toJson()
-
-proc handleRoundStartedEventForBot(bot:Bot, packet:string) =
-  let roundStartedEvent = packet.fromJson(RoundStartedEvent)
-  bot.onRoundStarted(roundStartedEvent)
-  withLock masterLock: running = true
-  botChannel.send("run")
-
-proc handleBotDeathEvent(bot:Bot, packet:string) =
-  let botDeathEvent = packet.fromJson(BotDeathEvent)
-  bot.onDeath(botDeathEvent)
-  withLock masterLock: running = false
-
-proc handleBotHitWallEvent(bot:Bot, packet:string) =
-  let botHitWallEvent = packet.fromJson(BotHitWallEvent)
-  bot.onHitWall(botHitWallEvent)
-
-proc handleBotHitBotEvent(bot:Bot, packet:string) =
-  let botHitBotEvent = packet.fromJson(BotHitBotEvent)
-  bot.onHitBot(botHitBotEvent)
-
-proc handleBulletFiredEvent(bot:Bot, packet:string) =
-  let bulletFiredEvent = packet.fromJson(BulletFiredEvent)
-  bot.onBulletFired(bulletFiredEvent)
-
-proc handleBulletHitBotEvent(bot:Bot, packet:string) =
-  let bulletHitBotEvent = packet.fromJson(BulletHitBotEvent)
-  bot.onBulletHitBot(bulletHitBotEvent)
-
-proc handleBulletHitWallEvent(bot:Bot, packet:string) =
-  let bulletHitWallEvent = packet.fromJson(BulletHitWallEvent)
-  bot.onBulletHitWall(bulletHitWallEvent)
-
-proc handleHitByBullet(bot:Bot, packet:string) =
-  let hitByBulletEvent = packet.fromJson(HitByBulletEvent)
-  bot.onHitByBullet(hitByBulletEvent)
-
-proc handleScannedBotEvent(bot:Bot, packet:string) =
-  let scannedBotEvent = packet.fromJson(ScannedBotEvent)
-  bot.onScannedBot(scannedBotEvent)
-
-proc handleWonRoundEvent(bot:Bot, packet:string) =
-  let wonRoundEvent = packet.fromJson(WonRoundEvent)
-  bot.onWonRound(wonRoundEvent)
-
-proc handleTickEvent(bot:Bot, packet:string) =
-  withLock masterLock: nextTurn = true
-  bot.tickEvent = packet.fromJson(TickEventForBot)
-  bot.onTick(bot.tickEvent)
-
-  # for every event inside this tick call the relative event for the bot
-  for event in bot.tickEvent.events:
-    case parseEnum[Type](event["type"].getStr()):
-    of Type.botDeathEvent: handleBotDeathEvent(bot, $event)
-    of Type.botHitWallEvent: handleBotHitWallEvent(bot, $event)
-    of Type.botHitBotEvent: handleBotHitBotEvent(bot, $event)
-    of Type.bulletFiredEvent: handleBulletFiredEvent(bot, $event)
-    of Type.bulletHitBotEvent: handleBulletHitBotEvent(bot, $event)
-    of Type.bulletHitWallEvent: handleBulletHitWallEvent(bot, $event)
-    of Type.hitByBulletEvent: handleHitByBullet(bot, $event)
-    of Type.scannedBotEvent: handleScannedBotEvent(bot, $event)
-    of Type.wonRoundEvent: handleWonRoundEvent(bot, $event)
-    else: echo "unknown event type: " & $event["type"].getStr()
-
-  stdout.write "+"
-
-proc handleSkippedTurnEvent(bot:Bot, packet:string) =
-  let skippedTurnEvent = packet.fromJson(SkippedTurnEvent)
-  bot.onSkippedTurn(skippedTurnEvent)
-
-  stdout.write("!")
-  stdout.flushFile()
-
-proc handleRoundEndedEventForBot(bot:Bot, packet:string) =
-  let roundEndedEventForBot = packet.fromJson(RoundEndedEventForBot)
-  bot.onRoundEnded(roundEndedEventForBot)
-  withLock masterLock: running = false
-
-proc handleGameAbortedEvent(bot:Bot, packet:string) =
-  let gameAbortedEvent = packet.fromJson(GameAbortedEvent)
-  bot.onGameAborted(gameAbortedEvent)
-  withLock masterLock: running = false
-
-proc handleGameEndedEventForBot(bot:Bot, packet:string) =
-  let gameEndedEventForBot = packet.fromJson(GameEndedEventForBot)
-  bot.onGameEnded(gameEndedEventForBot)
-  withLock masterLock: running = false
-
-proc listen(bot:Bot, socket:WebSocket) {.async.} =
+proc write(bot:Bot, socket:WebSocket) {.async.} =
   while socket.readyState == Open:
-    let msg = await socket.receiveStrPacket()
+    while bot.send.isEmptyOrWhitespace(): await sleepAsync(1)
+    await socket.send(bot.send)
+    stdout.write("-")
+    stdout.flushFile()
+    bot.send = ""
+
+proc connectAndListen(bot:Bot) {.async.} =
+  echo "[connectAndListen] connection url: ", bot.serverConnectionURL
+  var socket = await newWebSocket(bot.serverConnectionURL)
+
+  bot.connected = true
+
+  asyncCheck write(bot, socket)
+
+  while socket.readyState == Open:
+    var msg:string = await socket.receiveStrPacket()
     if msg.isEmptyOrWhitespace: continue
 
     let `type` = msg.fromJson(Schema).`type`
     case `type`:
-    of serverHandshake: await handleServerHandshake(bot, msg)
-    of gameStartedEventForBot: await handleGameStartedEventForBot(bot, msg)
-    of roundStartedEvent: handleRoundStartedEventForBot(bot, msg)
-    of tickEventForBot: handleTickEvent(bot, msg)
-    of skippedTurnEvent: handleSkippedTurnEvent(bot, msg)
-    of roundEndedEventForBot: handleRoundEndedEventForBot(bot, msg)
-    of gameAbortedEvent: handleGameAbortedEvent(bot, msg)
-    of gameEndedEventForBot: handleGameEndedEventForBot(bot, msg)
-    else:
-      echo "unknown packet type: " & $`type`
+    of Type.serverHandshake:
+      let server_handshake = msg.fromJson(ServerHandshake)
+      let bot_handshake = BotHandshake(`type`:Type.botHandshake, sessionId:server_handshake.sessionId, name:bot.name, version:bot.version, authors:bot.authors, secret:bot.secret, initialPosition:bot.initialPosition)
+      await socket.send bot_handshake.toJson()
+    of Type.gameStartedEventForBot:
+      let gameStartedEventForBot = msg.fromJson(GameStartedEventForBot)
+      bot.myId = gameStartedEventForBot.myId
+      bot.gameSetup = gameStartedEventForBot.gameSetup
+      await socket.send BotReady(`type`:Type.botReady).toJson()
+    of Type.roundStartedEvent:
+      bot.running = true
+      botChannel.send("run")
+    of Type.tickEventForBot:
+      stdout.write("+")
+      stdout.flushFile()
 
-proc write(bot:Bot, socket:WebSocket) {.async.} =
-  while socket.readyState == Open:
-    while bot.send.isEmptyOrWhitespace(): await sleepAsync(10)
-    await socket.send(bot.send)
-    bot.send = ""
+      bot.tickEvent = msg.fromJson(TickEventForBot)
 
-proc connect(bot:Bot) {.thread.} =
-  var socket = waitFor newWebSocket(bot.serverConnectionURL)
-  withLock masterLock: connected = true
-  bot.onConnect()
+      if firstTick:
+        firstTick = false
+        bot.running = true
+        botChannel.send("run")
 
-  asyncCheck listen(bot, socket)
-  asyncCheck write(bot, socket)
-  runForever()
+      for event in bot.tickEvent.events:
+        case parseEnum[Type](event["type"].getStr()):
+        of Type.botDeathEvent:
+          bot.eventsQueue.add(fromJson($event, BotDeathEvent))
+          firstTick = true
+          lastTurn = 0
+          bot.running = false
+        of Type.botHitWallEvent:
+          bot.eventsQueue.add(fromJson($event, BotHitWallEvent))
+        of Type.botHitBotEvent:
+          bot.eventsQueue.add(fromJson($event, BotHitBotEvent))
+        of Type.bulletFiredEvent:
+          bot.eventsQueue.add(fromJson($event, BulletFiredEvent))
+        of Type.bulletHitBotEvent:
+          bot.eventsQueue.add(fromJson($event, BulletHitBotEvent))
+        of Type.bulletHitWallEvent:
+          bot.eventsQueue.add(fromJson($event, BulletHitWallEvent))
+        of Type.hitByBulletEvent:
+          bot.eventsQueue.add(fromJson($event, HitByBulletEvent))
+        of Type.scannedBotEvent:
+          bot.eventsQueue.add(fromJson($event, ScannedBotEvent))
+        of Type.wonRoundEvent:
+          bot.eventsQueue.add(fromJson($event, WonRoundEvent))
+        else: echo "unknown event type: " & $event["type"].getStr()
+    of Type.skippedTurnEvent:
+      stdout.write("!")
+      stdout.flushFile()
+      bot.eventsQueue.add(fromJson(msg, SkippedTurnEvent))
+    of Type.roundEndedEventForBot:
+      bot.eventsQueue.add(fromJson(msg, RoundEndedEventForBot))
+      firstTick = true
+      lastTurn = 0
+      bot.running = false
+    of Type.gameAbortedEvent:
+      bot.eventsQueue.add(fromJson(msg, GameAbortedEvent))
+      firstTick = true
+      lastTurn = 0
+      bot.running = false
+    of Type.gameEndedEventForBot:
+      bot.eventsQueue.add(fromJson(msg, GameEndedEventForBot))
+      firstTick = true
+      lastTurn = 0
+      bot.running = false
+    else: echo "unknown packet type: ",`type`
+
+  echo "[connectAndListen] socket closed"
+
+proc eventsRunner(bot:Bot) {.thread.} =
+  while true:
+    if bot.eventsQueue.len > 0:
+      let event:Schema = bot.eventsQueue.pop()
+      case event.type:
+      of Type.scannedBotEvent: bot.onScannedBot((ScannedBotEvent)event)
+      of Type.skippedTurnEvent: bot.onSkippedTurn((SkippedTurnEvent)event)
+      of Type.roundEndedEventForBot: bot.onRoundEnded((RoundEndedEventForBot)event)
+      of Type.gameAbortedEvent: bot.onGameAborted((GameAbortedEvent)event)
+      of Type.gameEndedEventForBot: bot.onGameEnded((GameEndedEventForBot)event)
+      of Type.botDeathEvent: bot.onDeath((BotDeathEvent)event)
+      of Type.botHitWallEvent: bot.onHitWall((BotHitWallEvent)event)
+      of Type.botHitBotEvent: bot.onHitBot((BotHitBotEvent)event)
+      of Type.bulletFiredEvent: bot.onBulletFired((BulletFiredEvent)event)
+      of Type.bulletHitBotEvent: bot.onBulletHitBot((BulletHitBotEvent)event)
+      of Type.bulletHitWallEvent: bot.onBulletHitWall((BulletHitWallEvent)event)
+      of Type.hitByBulletEvent: bot.onHitByBullet((HitByBulletEvent)event)
+      of Type.wonRoundEvent: bot.onWonRound((WonRoundEvent)event)
+      else: echo "[eventsrunner] unknown event type: ", event.type
+    else: sleep(1)
 
 proc runBot(bot:Bot) {.thread.} =
   echo "[runBot] is online"
@@ -208,26 +200,41 @@ proc runBot(bot:Bot) {.thread.} =
     of "run":
       run bot
     
-      while running and connected:
+      while bot.running and bot.connected:
         go bot
     else: 
       echo "[runBot] quit"
       quit(0)
 
-proc startBot*(bot:Bot) =
-  botChannel.open()
+proc newBot(json_file: string): Bot =
+  # read the config file from disk
+  try:
+    # build the bot from the json
+    let path:string = joinPath(getAppDir(),json_file)
+    let content:string = readFile(path)
+    let bot:Bot = fromJson(content, Bot)
+    return bot
+  except IOError:
+    quit(1)
+
+proc startBot*(json_file: string) =
+  var bot = newBot(json_file)
 
   # secrets
   bot.serverConnectionURL = getEnv("SERVER_URL", DEFAULT_SERVER_URL)
   bot.secret = getEnv("SERVER_SECRET", DEFAULT_SERVER_SECRET)
 
-  var
-    connectThread:Thread[bot.type]
-    botThread:Thread[bot.type]
+  botChannel.open()
+  methodsChannel.open()
 
-  createThread connectThread, connect, bot
-  createThread botThread, runBot, bot
+  var botThr:Thread[Bot]
+  var eventsThr:Thread[Bot]
+  createThread botThr,runBot,bot
+  createThread eventsThr,eventsRunner,bot
 
-  joinThreads connectThread, botThread
+  waitFor connectAndListen(bot)
+
+  joinThreads botThr, eventsThr
 
   botChannel.close()
+  methodsChannel.close()

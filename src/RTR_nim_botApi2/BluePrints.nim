@@ -1,14 +1,7 @@
-import std/[os]
-import jsony
 import Schemas
 
 type
-  # Condition object for custom conditons
-  Condition* = ref object of RootObj
-    name*: string # the condition name
-    test*: proc (bot:Bot):bool # the condition function
-
-  BluePrint = ref object of RootObj
+  BluePrint* = ref object of RootObj
     # filled from JSON
     name*:string = "BluePrint"
     version*:string
@@ -27,30 +20,12 @@ type
     myId*:int
     gameSetup*:GameSetup
     tickEvent*:TickEventForBot
-    intent*:BotIntent = BotIntent(`type`: Type.botIntent)
-    first_tick*:bool = true # used to detect if the bot have been stated at first tick
-
-    # usage during the games
-    send*:string = ""
-
-  Bot* = ref object of BluePrint
-  
-proc newBot*(json_file: string): Bot =
-  # read the config file from disk
-  try:
-    # build the bot from the json
-    let path:string = joinPath(getAppDir(),json_file)
-    let content:string = readFile(path)
-    let bot:Bot = fromJson(content, Bot)
-    # maybe code here ...
-    return bot
-  except IOError:
-    quit(1)
+    intent*:BotIntent = BotIntent(`type`: Type.botIntent, fireAssist: true)
 
 # the following section contains all the methods that are supposed to be overrided by the bot creator
 method run*(bot:BluePrint) {.base gcsafe.} = discard # this method is called in a secondary thread
 method onBulletFired*(bot:BluePrint, bulletFiredEvent:BulletFiredEvent) {.base gcsafe.} = discard
-method onBulletHitBot*(bot:Bot, bulletHitBotEvent:BulletHitBotEvent) {.base gcsafe.} = discard
+method onBulletHitBot*(bot:BluePrint, bulletHitBotEvent:BulletHitBotEvent) {.base gcsafe.} = discard
 method onBulletHitBullet*(bot:BluePrint, bulletHitBulletEvent:BulletHitBulletEvent) {.base gcsafe.} = discard
 method onBulletHitWall*(bot:BluePrint, bulletHitWallEvent:BulletHitWallEvent) {.base gcsafe.} = discard
 method onGameAborted*(bot:BluePrint, gameAbortedEvent:GameAbortedEvent) {.base gcsafe.} = discard
