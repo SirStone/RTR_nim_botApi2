@@ -1,5 +1,5 @@
 import Schemas
-import ws
+import ws, json
 
 type
   BluePrint = ref object of RootObj
@@ -15,17 +15,23 @@ type
     countryCodes:seq[string]
 
   Bot* = ref object of BluePrint
-    botIntent:BotIntent
-    tickEvent:TickEventForBot
+    serverUrl:string
+    serverSecret:string
+    botIntent*:BotIntent
+    tickEvent*:TickEventForBot
     initialPosition:InitialPosition = InitialPosition(x:0, y:0, angle:0)
     connected:bool = false
     running:bool = false
     gameStartedEventForBot:GameStartedEventForBot
+    eventsQueue*:seq[string] = @[]
+    firstTick:bool = true
+    lastTurn:int = 0
 
 #++++++++ BOT METHODS ++++++++#
 # the following section contains all the methods that are supposed to be overrided by the bot creator
 method run*(bot:BluePrint) {.base gcsafe.} = discard # this method is called in a secondary thread
 method onBulletFired*(bot:BluePrint, bulletFiredEvent:BulletFiredEvent) {.base gcsafe.} = discard
+method onBulletHitBot*(bot:BluePrint, bulletHitBotEvent:BulletHitBotEvent) {.base gcsafe.} = discard
 method onBulletHitBullet*(bot:BluePrint, bulletHitBulletEvent:BulletHitBulletEvent) {.base gcsafe.} = discard
 method onBulletHitWall*(bot:BluePrint, bulletHitWallEvent:BulletHitWallEvent) {.base gcsafe.} = discard
 method onGameAborted*(bot:BluePrint, gameAbortedEvent:GameAbortedEvent) {.base gcsafe.} = discard
@@ -56,18 +62,27 @@ proc getProgrammingLang*(bot:Bot):string = bot.programmingLang
 proc getGameTypes*(bot:Bot):seq[string] = bot.gameTypes
 proc getAuthors*(bot:Bot):seq[string] = bot.authors
 proc getCountryCodes*(bot:Bot):seq[string] = bot.countryCodes
+proc getServerUrl*(bot:Bot):string = bot.serverUrl
+proc getServerSecret*(bot:Bot):string = bot.serverSecret
 proc getInitialPosition*(bot:Bot):InitialPosition = bot.initialPosition
 proc getBotIntent*(bot:Bot):BotIntent = bot.botIntent
-proc getTurn*(bot:Bot):int =
-  if bot.tickEvent.isNil: 0
-  else: bot.tickEvent.turnNumber
+proc getTurn*(bot:Bot):int = bot.tickEvent.turnNumber
+proc getLastTurn*(bot:Bot):int = bot.lastTurn
+proc getMyId*(bot:Bot):int = bot.gameStartedEventForBot.myId
 
 proc isConnected*(bot:Bot):bool = bot.connected
 proc isRunning*(bot:Bot):bool = bot.running
+proc isFirstTick*(bot:Bot):bool = bot.firstTick
 
 proc setConnected*(bot:Bot, connected:bool) = bot.connected = connected
-proc setRunning*(bot:Bot, running:bool) = bot.running = running
+proc setRunning*(bot:Bot, running:bool) =
+  bot.running = running
+  if running: bot.firstTick = false
+  else: bot.firstTick = true
 proc setGameStartedEventForBot*(bot:Bot, gameStartedEventForBot:GameStartedEventForBot) = bot.gameStartedEventForBot = gameStartedEventForBot
 proc setTick*(bot:Bot, tickEvent:TickEventForBot) = bot.tickEvent = tickEvent
+proc setServerUrl*(bot:Bot, serverUrl:string) = bot.serverUrl = serverUrl
+proc setServerSecret*(bot:Bot, serverSecret:string) = bot.serverSecret = serverSecret
+proc setLastTurn*(bot:Bot, lastTurn:int) = bot.lastTurn = lastTurn
 
-proc newIntent*(bot:Bot) = bot.botIntent = BotIntent(`type`:Type.botIntent)
+proc newIntent*(bot:Bot) = bot.botIntent = BotIntent(`type`:Type.botIntent, fireAssist:true)

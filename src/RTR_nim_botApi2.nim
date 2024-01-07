@@ -1,11 +1,11 @@
 import std/[os, strutils, math]
-import ws, json, jsony, asyncdispatch
+import whisky, json, jsony, malebolgia, malebolgia/ticketlocks
 
 import RTR_nim_botApi2/[Schemas, Utils, BotLib]
 export Schemas, BotLib
 
 #++++++++ CONSTANTS ++++++++#
-let
+const
   # bots accelerate at the rate of 1 unit per turn but decelerate at the rate of 2 units per turn
   ACCELERATION:float = 1
   DECELERATION:float = -2
@@ -39,167 +39,228 @@ type
 
 #++++++++ GLOBALS ++++++++#
 var
-  serverUrl:string = getEnv("SERVER_URL", DEFAULT_SERVER_URL)
-  serverSecret:string = getEnv("SERVER_SECRET", DEFAULT_SERVER_SECRET)
   botRunner_channel:Channel[string]
-  intent_channel:Channel[BotIntent]
-  currentTurn:int = 0
 
-proc go(bot:Bot) =
-  intent_channel.send(bot.getBotIntent())
-  currentTurn = bot.getTurn()
+proc go*(bot:Bot) =
+  if bot.getTurn() == bot.getLastTurn(): return
+  bot.setLastTurn(bot.getTurn())
+  bot.eventsQueue.add(bot.botIntent.toJson())
 
-  stdout.write "-"
-  stdout.flushFile()
-  while bot.getTurn() <= currentTurn:
-    waitFor sleepAsync(1)
+  bot.botIntent.firepower = 0
 
-proc botRunner(bot:Bot) {.thread.} =
+  while bot.getTurn() == bot.getLastTurn(): discard
+
+proc botRunner(bot:ptr Bot) =
   echo "botRunner started, waiting on channel"
   let msg:string = botRunner_channel.recv()
   case msg:
   of "connected":
     echo "[botRunner] 'connected' received"
-    bot.newIntent()
-    while bot.isConnected():
+    bot[].newIntent()
+    while bot[].isConnected():
       let msg:string = botRunner_channel.recv()
       case msg:
-      of "roundStarted":
-        while bot.isRunning() and bot.isConnected():
-          bot.go()
-      echo "botRunner received message: ", msg
+      of "run":
+        bot[].run()
+        while bot[].isRunning() and bot[].isConnected():
+          bot[].go()
   of "disconnected":
     echo "[botRunner] 'disconnected' received"
   else:
     echo "botRunner received unknown message: ", msg
   echo "botRunner CLOSED"
 
-proc connectAndListen(bot:Bot, serverUrl:string) {.async.} =
-  var socket:WebSocket
+#++++++++ REMAININGS ++++++++#
+var gunTurnRemaining:float = 0
+var radarTurnRemaining:float = 0
+var turnRemaining:float = 0
+var distanceRemaining:float = 0
 
-  proc handleServerHandshake(bot:Bot, packet:string) {.async.} =
-    let server_handshake = packet.fromJson(ServerHandshake)
-    let bot_handshake = BotHandshake(`type`:Type.botHandshake, sessionId:server_handshake.sessionId, name:bot.getName(), version:bot.getVersion, authors:bot.getAuthors, secret:serverSecret, initialPosition:bot.getInitialPosition())
-    await socket.send(bot_handshake.toJson())
+proc setGunTurnRate*(bot:Bot, rate:float) =
+  gunTurnRemaining = toInfiniteValue(rate)
+  bot.botIntent.gunTurnRate = clamp(rate, -MAX_GUN_TURN_RATE, MAX_GUN_TURN_RATE)
 
-  proc handleGameStartedEventForBot(bot:Bot, packet:string) {.async.} =
-    let gameStartedEventForBot = packet.fromJson(GameStartedEventForBot)
-    bot.setGameStartedEventForBot(gameStartedEventForBot)
-    await socket.send(BotReady(`type`:Type.botReady).toJson)
+proc setRadarTurnRate*(bot:Bot, rate:float) =
+  radarTurnRemaining = toInfiniteValue(rate)
+  bot.botIntent.radarTurnRate = clamp(rate, -MAX_RADAR_TURN_RATE, MAX_RADAR_TURN_RATE)
 
-  proc handleRoundStartedEventForBot(bot:Bot, packet:string) =
-    let roundStartedEvent = packet.fromJson(RoundStartedEvent)
-    bot.onRoundStarted(roundStartedEvent)
-    bot.setRunning(true)
-    botRunner_channel.send("roundStarted")
+proc setTurnRate*(bot:Bot, rate:float) =
+  turnRemaining = toInfiniteValue(rate)
+  bot.botIntent.turnRate = clamp(rate, -MAX_TURN_RATE, MAX_TURN_RATE)
 
-  proc handleTickEvent(bot:Bot, packet:string) =
-    let tickEventForBot = packet.fromJson(TickEventForBot)
-    bot.setTick(tickEventForBot)
-    bot.onTick(tickEventForBot)
-    stdout.write "+"
-    stdout.flushFile()
+proc setTargetSpeed*(bot:Bot, speed:float) =
+  distanceRemaining = toInfiniteValue(speed)
+  bot.botIntent.targetSpeed = clamp(speed, -MAX_SPEED, MAX_SPEED)
 
-  proc handleSkippedTurnEvent(bot:Bot, packet:string) =
-    let skippedTurnEvent = packet.fromJson(SkippedTurnEvent)
-    bot.onSkippedTurn(skippedTurnEvent)
-    stdout.write("!")
-    stdout.flushFile()
+proc setFire*(bot:Bot, power:float):bool =
+  if bot.tickEvent.botState.gunHeat > 0: return false
+  bot.botIntent.firePower = clamp(power, MIN_FIRE_POWER, MAX_FIRE_POWER)
+  return true
 
-  proc handleRoundEndedEventForBot(bot:Bot, packet:string) =
-    let roundEndedEventForBot = packet.fromJson(RoundEndedEventForBot)
-    bot.onRoundEnded(roundEndedEventForBot)
-    bot.setRunning(false)
+proc fire*(bot:Bot, power:float) =
+  if setFire(bot, power): bot.go()
 
-  proc handleGameAbortedEvent(bot:Bot, packet:string) =
-    let gameAbortedEvent = packet.fromJson(GameAbortedEvent)
-    bot.onGameAborted(gameAbortedEvent)
-    bot.setRunning(false)
+proc getGunTurnRate*(bot:Bot):float = bot.botIntent.gunTurnRate
+proc getRadarTurnRate*(bot:Bot):float = bot.botIntent.radarTurnRate
+proc getTurnRate*(bot:Bot):float = bot.botIntent.turnRate
+proc getTargetSpeed*(bot:Bot):float = bot.botIntent.targetSpeed
 
-  proc handleGameEndedEventForBot(bot:Bot, packet:string) =
-    let gameEndedEventForBot = packet.fromJson(GameEndedEventForBot)
-    bot.onGameEnded(gameEndedEventForBot)
-    bot.setRunning(false)
+proc handleServerHandshake(bot:Bot, packet:string, socket:WebSocket) =
+  let server_handshake = packet.fromJson(ServerHandshake)
+  let bot_handshake = BotHandshake(`type`:Type.botHandshake, sessionId:server_handshake.sessionId, name:bot.getName(), version:bot.getVersion, authors:bot.getAuthors, secret:bot.getServerSecret, initialPosition:bot.getInitialPosition())
+  socket.send(bot_handshake.toJson())
 
-  proc handleMessage(bot:Bot, packet:string) {.async.} =
-    let `type` = packet.fromJson(Schema).`type`
+proc handleGameStartedEventForBot(bot:Bot, packet:string, socket:WebSocket) =
+  let gameStartedEventForBot = packet.fromJson(GameStartedEventForBot)
+  bot.setGameStartedEventForBot(gameStartedEventForBot)
+  socket.send(BotReady(`type`:Type.botReady).toJson)
+
+proc handleRoundStartedEventForBot(bot:Bot, packet:string) =
+  let roundStartedEvent = packet.fromJson(RoundStartedEvent)
+  bot.onRoundStarted(roundStartedEvent)
+
+proc handleBotDeathEvent(bot:Bot, packet:string) =
+  let botDeathEvent = packet.fromJson(BotDeathEvent)
+  bot.onDeath(botDeathEvent)
+  bot.setRunning(false)
+
+proc handleBotHitWallEvent(bot:Bot, packet:string) =
+  let botHitWallEvent = packet.fromJson(BotHitWallEvent)
+  bot.onHitWall(botHitWallEvent)
+
+proc handleBotHitBotEvent(bot:Bot, packet:string) =
+  let botHitBotEvent = packet.fromJson(BotHitBotEvent)
+  bot.onHitBot(botHitBotEvent)
+
+proc handleBulletFiredEvent(bot:Bot, packet:string) =
+  let bulletFiredEvent = packet.fromJson(BulletFiredEvent)
+  bot.onBulletFired(bulletFiredEvent)
+
+proc handleBulletHitBotEvent(bot:Bot, packet:string) =
+  let bulletHitBotEvent = packet.fromJson(BulletHitBotEvent)
+  if bulletHitBotEvent.victimId == bot.getMyId():
+    let hitByBulletEvent = HitByBulletEvent(`type`:Type.hitByBulletEvent, bullet:bulletHitBotEvent.bullet, damage:bulletHitBotEvent.damage, energy:bulletHitBotEvent.energy)
+    bot.onHitByBullet(hitByBulletEvent)
+  else:
+    bot.onBulletHitBot(bulletHitBotEvent)
+
+proc handleBulletHitBulletEvent(bot:Bot, packet:string) =
+  let bulletHitBulletEvent = packet.fromJson(BulletHitBulletEvent)
+  bot.onBulletHitBullet(bulletHitBulletEvent)
+
+proc handleBulletHitWallEvent(bot:Bot, packet:string) =
+  let bulletHitWallEvent = packet.fromJson(BulletHitWallEvent)
+  bot.onBulletHitWall(bulletHitWallEvent)
+
+proc handleScannedBotEvent(bot:Bot, packet:string) =
+  let scannedBotEvent = packet.fromJson(ScannedBotEvent)
+  bot.onScannedBot(scannedBotEvent)
+
+proc handleWonRoundEvent(bot:Bot, packet:string) =
+  let wonRoundEvent = packet.fromJson(WonRoundEvent)
+  bot.onWonRound(wonRoundEvent)
+  bot.setRunning(false)
+
+proc handleTickEvent(bot:Bot, packet:string) =
+  let tickEventForBot = packet.fromJson(TickEventForBot)
+
+  bot.onTick(tickEventForBot)
+  for event in tickEventForBot.events:
+    let `type` = parseEnum[Type](event["type"].getStr())
     case `type`:
-    of serverHandshake: await handleServerHandshake(bot, packet)
-    of gameStartedEventForBot: await handleGameStartedEventForBot(bot, packet)
-    of roundStartedEvent: handleRoundStartedEventForBot(bot, packet)
-    of tickEventForBot: handleTickEvent(bot, packet)
-    of skippedTurnEvent: handleSkippedTurnEvent(bot, packet)
-    of roundEndedEventForBot: handleRoundEndedEventForBot(bot, packet)
-    of gameAbortedEvent: handleGameAbortedEvent(bot, packet)
-    of gameEndedEventForBot: handleGameEndedEventForBot(bot, packet)
-    else:
-      echo "unknown packet type: " & $`type`
+    of Type.botDeathEvent: handleBotDeathEvent(bot, $event)
+    of Type.botHitWallEvent: handleBotHitWallEvent(bot, $event)
+    of Type.botHitBotEvent: handleBotHitBotEvent(bot, $event)
+    of Type.bulletFiredEvent: handleBulletFiredEvent(bot, $event)
+    of Type.bulletHitBotEvent: handleBulletHitBotEvent(bot, $event)
+    of Type.bulletHitBulletEvent: handleBulletHitBulletEvent(bot, $event)
+    of Type.bulletHitWallEvent: handleBulletHitWallEvent(bot, $event)
+    of Type.scannedBotEvent: handleScannedBotEvent(bot, $event)
+    of Type.wonRoundEvent: handleWonRoundEvent(bot, $event)
+    else: echo "unknown event type: " & $event["type"].getStr()
 
-  proc connect() {.async.} =
+  bot.tickEvent = tickEventForBot
+
+  if bot.isFirstTick():
+    bot.setRunning(true)
+    botRunner_channel.send("run")
+  
+proc handleSkippedTurnEvent(bot:Bot, packet:string) =
+  let skippedTurnEvent = packet.fromJson(SkippedTurnEvent)
+  bot.onSkippedTurn(skippedTurnEvent)
+
+proc handleRoundEndedEventForBot(bot:Bot, packet:string) =
+  let roundEndedEventForBot = packet.fromJson(RoundEndedEventForBot)
+  bot.onRoundEnded(roundEndedEventForBot)
+  bot.setRunning(false)
+
+proc handleGameAbortedEvent(bot:Bot, packet:string) =
+  let gameAbortedEvent = packet.fromJson(GameAbortedEvent)
+  bot.onGameAborted(gameAbortedEvent)
+  bot.setRunning(false)
+
+proc handleGameEndedEventForBot(bot:Bot, packet:string) =
+  let gameEndedEventForBot = packet.fromJson(GameEndedEventForBot)
+  bot.onGameEnded(gameEndedEventForBot)
+  bot.setRunning(false)
+
+proc messageHandler(bot: ptr Bot, socket: ptr WebSocket, L:ptr TicketLock) {.gcsafe.} =
+  var packet:string=""
+  while true:
     try:
-      echo "[",bot.getName(),".connect] trying to connect to ", serverUrl
-      socket = await newWebSocket(serverUrl)
-    except WebSocketClosedError:
-      botRunner_channel.send("disconnected")
-      echo "Socket closed."
-    except WebSocketProtocolMismatchError:
-      botRunner_channel.send("disconnected")
-      echo "Socket tried to use an unknown protocol: ", getCurrentExceptionMsg()
-    except WebSocketError:
-      botRunner_channel.send("disconnected")
-      echo "Unexpected socket error: ", getCurrentExceptionMsg()
-    botRunner_channel.send("connected")
-    bot.setConnected(true)
-
-  proc writer() {.async.} =
-    while socket.readyState == Open:
-      let data = intent_channel.tryRecv()
-      if data.msg.isNil:
-        await sleepAsync(1)
-        continue
-      
-      await socket.send(data.msg.toJson)
-
-  proc listen() {.async.} =
-    try:
-      echo "[",bot.getName(),".listen] listening..."
-      while socket.readyState == Open:
-        let packet = await socket.receiveStrPacket()
-        if packet.isEmptyOrWhitespace: continue
-        await handleMessage(bot, packet)
-    except WebSocketClosedError:
-      botRunner_channel.send("disconnected")
-      echo "Socket closed."
-    except WebSocketProtocolMismatchError:
-      botRunner_channel.send("disconnected")
-      echo "Socket tried to use an unknown protocol: ", getCurrentExceptionMsg()
-    except WebSocketError:
-      botRunner_channel.send("disconnected")
-      echo "Unexpected socket error: ", getCurrentExceptionMsg()
-    except:
-      botRunner_channel.send("disconnected")
-      echo "Unexpected error: ", getCurrentExceptionMsg()
-
-  await connect()
-  asyncCheck writer()
-  waitFor listen()
+      withLock L[]:
+        packet = bot[].eventsQueue.pop()
+      let `type` = packet.fromJson(Schema).`type`
+      case `type`:
+      of serverHandshake: handleServerHandshake(bot[], packet, socket[])
+      of gameStartedEventForBot: handleGameStartedEventForBot(bot[], packet, socket[])
+      of roundStartedEvent: handleRoundStartedEventForBot(bot[], packet)
+      of tickEventForBot: handleTickEvent(bot[], packet)
+      of skippedTurnEvent: handleSkippedTurnEvent(bot[], packet)
+      of roundEndedEventForBot: handleRoundEndedEventForBot(bot[], packet)
+      of gameAbortedEvent: handleGameAbortedEvent(bot[], packet)
+      of gameEndedEventForBot: handleGameEndedEventForBot(bot[], packet)
+      of botIntent: socket[].send(packet)
+      else:
+        echo "unknown packet type: " & $`type`
+    except IndexDefect: continue
 
 proc start*(json_file:string) =
   try:
     # build the bot from the json
     let path:string = joinPath(getAppDir(),json_file)
     let content:string = readFile(path)
-    let bot:Bot = content.fromJson(Bot)
+    let bot = content.fromJson(Bot)
+    var L = initTicketLock()
 
     botRunner_channel.open()
-    intent_channel.open()
     
-    var botThread:Thread[Bot]
+    var m = createMaster()
+    m.awaitAll:
+      m.spawn botRunner(addr bot)
 
-    createThread botThread, botRunner, bot
-    waitFor connectAndListen(bot, serverUrl)
+      bot.setServerUrl getEnv("SERVER_URL", DEFAULT_SERVER_URL)
+      bot.setServerSecret getEnv("SERVER_SECRET", DEFAULT_SERVER_SECRET)
+  
+      let socket = newWebSocket(bot.getServerUrl())
+      bot.setConnected(true)
+      botRunner_channel.send("connected")
+
+      m.spawn messageHandler(addr bot, addr socket, addr L)
+
+      while true:
+        let packet = socket.receiveMessage()
+        if packet.isSome():
+          let msg = packet.get()
+          case msg.kind:
+          of Ping:
+            socket.send("",Pong)
+          of TextMessage:
+            withLock L:
+              bot.eventsQueue.add(msg.data)
+          else:
+            echo "unhandled message kind: ", msg.kind
 
     botRunner_channel.close()
-    intent_channel.close()
   except IOError:
     quit(1)
