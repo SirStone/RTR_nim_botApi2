@@ -26,9 +26,9 @@ var
   serverConnectionURL:string = "ws://localhost:"&port
 
 let
-  assets_version = "0.22.0"
-  botSecret = "testBotSecret"
-  controllerSecret = "testControllerSecret"
+  assets_version = "0.22.1"
+  botSecret = "HUSx1iswndrSXqWncZayBlMJUdeJn+VLJYFdjf2I6y"
+  controllerSecret = "229BQpVLDfcocyMQBSjJV66bYmXf9ch8SWaYJoAqZm"
   possible_actions = @["turnLeft", "turnRight", "turnGunLeft", "turnGunRight", "turnRadarLeft", "turnRadarRight", "forward", "back"]
   # possible_actions = @["forward", "back"]
   numberOfTests = 10
@@ -79,7 +79,7 @@ proc runTankRoyaleServer() =
     port = $rand(1_000..65_535)
     serverConnectionURL = "ws://localhost:"&port
     let serverArgs = ["-jar", "robocode-tankroyale-server-"&assets_version&".jar", "--bot-secrets", botSecret, "--controller-secrets", controllerSecret, "--port", port, "--enable-initial-position"]
-    serverProcess = startProcess(command="java", workingDir="../assets/RTR", args=serverArgs, options={poUsePath, poParentStreams, poEchoCmd})
+    serverProcess = startProcess(command="java", workingDir="../assets/RTR/", args=serverArgs, options={ poEchoCmd, poUsePath, poParentStreams, poStdErrToStdOut})
   except CatchableError:
     echo "error with the server:", getCurrentExceptionMsg()
 

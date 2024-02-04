@@ -6,7 +6,7 @@ stable.mkShell {
   nativeBuildInputs = [ 
     stable.nim2
     unstable.nimble
-    stable.jdk
+    stable.jdk21
     stable.valgrind
     stable.gdb
   ];
