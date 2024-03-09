@@ -1,35 +1,73 @@
+# interaction between threads
+This should describe what I think should be (or help me find out) the best way to implement the Bot Library interaction with the user code and the game server.
+
 ```mermaid
 sequenceDiagram
-    actor NewBot
+    participant SERVER
+    participant LIB
+    activate SERVER
+    Note over BOT: the user starts the bot <br> by activating the library
+    activate BOT
 
-    create participant Bot
-    NewBot->>Bot: startBot
+    BOT->>LIB: start(json)
+    deactivate BOT
 
-    actor GameServer
-    Bot-->>Bot: init
-    Bot--)GameServer: ws attempt connection
-    alt Connection success
-        create participant RunThread
-        Bot->>RunThread: start
-        Note over RunThread: Wait for run condition
+    activate LIB
+    Note over LIB: connection with the server
+    Note over LIB: listening for events <br> from the server
 
-        GameServer->>Bot: round-started-event
-        Note over Bot: Run condition = true
-        Bot->>RunThread: run condition signal
+    SERVER-)LIB: roundStarted-event
+    activate LIB
 
-        RunThread->>NewBot: Run()
-        activate NewBot
-        NewBot--)Bot: go()
-        Bot--)GameServer: bot-intent
-        Note over NewBot: can send go multiple times
-        NewBot->>RunThread: run() end
-        deactivate NewBot
-        RunThread--)Bot: go()
-        Note over RunThread: can send go multiple times
+    LIB-)BOT: onRoundStarted(event)
+    activate BOT
+    deactivate BOT
 
-        Bot--)Bot: listenting for messages 
-    else Connection failed
-        destroy Bot
-        Bot->>NewBot: return
-    end    
+    create participant THREAD
+    LIB-)THREAD: create a new thread
+    deactivate LIB
+
+    THREAD->>BOT: run()
+    activate BOT
+    
+    loop Every turn/tick <br> loops indefenitely while bot is RUNNING
+        BOT->>LIB:go()
+        activate LIB
+        LIB-)SERVER: bot intent
+        LIB->>LIB: wait until NEXT_TURN
+        LIB->>BOT: Go() return
+        deactivate LIB
+    end
+
+    BOT->>THREAD: run() return
+    deactivate BOT
+    activate THREAD
+
+    loop Every turn/tick <br> loops definitely while bot is RUNNING
+        THREAD->>LIB: Go()
+        deactivate THREAD
+        activate LIB
+        LIB-)SERVER: bot intent
+        LIB->>LIB: wait until NEXT_TURN
+        LIB->>THREAD: Go() return
+        deactivate LIB
+    end
+
+    SERVER-)LIB: tick-event (NEXT_TURN arrived)
+
+    SERVER-)LIB: bot-death-event <br> won-round-event <br> game-aborted-event <br> game-ended-event <br> round-ended-event
+    LIB-)BOT: onDeath(event) <br> onRoundWon(event) <br> onGameAborted(event) <br> onGameEnded(event) <br> onRoundEnded(event)
+    activate BOT
+    deactivate BOT
+    Note over LIB: all these end the bot RUNNING
+    
+    opt Generic event
+        SERVER-)LIB: generic-event
+        LIB-)BOT: onGenericMethod(generic-event)
+        activate BOT
+    deactivate BOT
+    end
+
+    deactivate LIB
+    deactivate SERVER
 ```

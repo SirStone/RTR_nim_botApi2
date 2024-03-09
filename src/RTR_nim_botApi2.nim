@@ -5,53 +5,56 @@ import RTR_nim_botApi2/[Schemas, Bot]
 export Schemas, Bot, Condition
 
 # globals
-var botWorkerChan:Channel[string]
-var customConditionsWorkerChan:Channel[string]
-var waitForWorkerChan:Channel[string]
+var botWorkerChan: Channel[string]
+var customConditionsWorkerChan: Channel[string]
+var waitForWorkerChan: Channel[string]
 var skipped = 0
 
 # proc to b eused as logging stuff in the stdout
-proc log*(bot:Bot, msg:string) =
+proc log*(bot: Bot, msg: string) =
   stdout.writeLine "[" & bot.name & ".log] " & msg
   stdout.flushFile
 
-proc console_log*(bot:Bot, msg:string) =
+proc console_log*(bot: Bot, msg: string) =
   stdout.writeLine msg
   stdout.flushFile
   bot.intent.stdOut.add(msg)
 
-proc setConnectionParameters*(bot:Bot, serverConnectionURL:string, secret:string) =
+proc setConnectionParameters*(bot: Bot, serverConnectionURL: string,
+    secret: string) =
   ## **Set the connection parameters**
-  ## 
+  ##
   ## This method is used to set the connection parameters for the bot to connect to the game server.
-  ## 
+  ##
   ## `serverConnectionURL` is the url of the game server
-  ## 
+  ##
   ## `secret` is the secret required by the server to connect
-  ## 
+  ##
   ## Example:
-  ## 
+  ##
   ## ```nim
   ## setConnectionParameters("ws://localhost:1234", "botsecretcode")
   ## ```
-  ## 
+  ##
   ## This method is optional. If not called the bot will use the default values of `ws://localhost` and `7654`
-  ## 
+  ##
   ## This method must be called before `startBot()`
-  ## 
+  ##
   ## This method is mostly used for testing
   bot.serverConnectionURL = serverConnectionURL
   bot.secret = secret
 
-proc addCustomCondition*(bot:Bot, name:string, test:proc (bot:Bot):bool) {.gcsafe.} =
+proc addCustomCondition*(bot: Bot, name: string, test: proc (
+    bot: Bot): bool) {.gcsafe.} =
   ## add a custom condition to the bot
-  ## 
+  ##
   ## `name` is the name of the condition
   ## `test` is the function that will be called to test the condition
-  {.locks: [customConditionsLock] gcsafe.}: customConditions.add(Condition(name: name, test: test))
+  {.locks: [customConditionsLock]gcsafe.}: customConditions.add(Condition(
+      name: name, test: test))
 
 # proc to run a custom codition in different thread
-proc customConditionsWorker(bot:Bot) {.thread.} =
+proc customConditionsWorker(bot: Bot) {.thread.} =
   # While the bot is connected to the server the bot thread should live
   var msg = customConditionsWorkerChan.recv()
 
@@ -69,13 +72,13 @@ proc customConditionsWorker(bot:Bot) {.thread.} =
       else:
         while isRunning(bot) and bot.connected:
           # check the custom coditions
-          {.locks: [customConditionsLock] gcsafe.}:
+          {.locks: [customConditionsLock]gcsafe.}:
             for customCondition in customConditions:
-                if customCondition.test(bot):
-                  bot.onCustomCondition(customCondition.name)
+              if customCondition.test(bot):
+                bot.onCustomCondition(customCondition.name)
           sleep 1
 
-proc handleMessage(bot:Bot, json_message:string) =
+proc handleMessage(bot: Bot, json_message: string) =
   # Convert the json to a Message object
   let message = json2schema json_message
 
@@ -83,10 +86,13 @@ proc handleMessage(bot:Bot, json_message:string) =
   case message.`type`:
   of serverHandshake:
     let server_handshake = (ServerHandshake)message
-    let bot_handshake = BotHandshake(`type`:Type.botHandshake, sessionId:server_handshake.sessionId, name:bot.name, version:bot.version, authors:bot.authors, secret:bot.secret, initialPosition:bot.initialPosition)
+    let bot_handshake = BotHandshake(`type`: Type.botHandshake,
+        sessionId: server_handshake.sessionId, name: bot.name,
+        version: bot.version, authors: bot.authors, secret: bot.secret,
+        initialPosition: bot.initialPosition)
     {.locks: [messagesSeqLock].}: bot.messagesToSend.add(bot_handshake.toJson)
     # sendMessage_channel.send(bot_handshake.toJson)
-    
+
     # signal the threads that the connection is ready
     bot.connected = true
     botWorkerChan.send("connected")
@@ -101,9 +107,9 @@ proc handleMessage(bot:Bot, json_message:string) =
 
     # activating the bot method
     bot.onGameStarted(game_started_event_for_bot)
-    
+
     # send bot ready
-    {.locks: [messagesSeqLock].}: bot.messagesToSend.add(BotReady(`type`:Type.botReady).toJson)
+    {.locks: [messagesSeqLock].}: bot.messagesToSend.add(BotReady(`type`: Type.botReady).toJson)
     # sendMessage_channel.send(BotReady(`type`:Type.botReady).toJson)
 
   of tickEventForBot:
@@ -124,13 +130,16 @@ proc handleMessage(bot:Bot, json_message:string) =
     else:
       # if bot.name == "TEST BOT":
       #   echo "tick_event_for_bot.botState.direction: ", tick_event_for_bot.botState.direction, " bot.botState.direction: ", bot.botState.direction
-      turnRate_done = tick_event_for_bot.botState.direction - bot.botState.direction
+      turnRate_done = tick_event_for_bot.botState.direction -
+          bot.botState.direction
       turnRate_done = (turnRate_done + 540) mod 360 - 180
 
-      gunTurnRate_done = tick_event_for_bot.botState.gunDirection - bot.botState.gunDirection
+      gunTurnRate_done = tick_event_for_bot.botState.gunDirection -
+          bot.botState.gunDirection
       gunTurnRate_done = (gunTurnRate_done + 540) mod 360 - 180
 
-      radarTurnRate_done = tick_event_for_bot.botState.radarDirection - bot.botState.radarDirection
+      radarTurnRate_done = tick_event_for_bot.botState.radarDirection -
+          bot.botState.radarDirection
       radarTurnRate_done = (radarTurnRate_done + 540) mod 360 - 180
 
       distance_done = tick_event_for_bot.botState.speed
@@ -138,7 +147,7 @@ proc handleMessage(bot:Bot, json_message:string) =
     bot.botState = tick_event_for_bot.botState
     bot.turnNumber = tick_event_for_bot.turnNumber
     bot.roundNumber = tick_event_for_bot.roundNumber
- 
+
     # activating the bot method
     bot.onTick(tick_event_for_bot)
 
@@ -182,10 +191,10 @@ proc handleMessage(bot:Bot, json_message:string) =
       of Type.scannedBotEvent:
         bot.onScannedBot(fromJson($event, ScannedBotEvent))
       of Type.wonRoundEvent:
-        bot.onWonRound(fromJson($event, WonRoundEvent))     
+        bot.onWonRound(fromJson($event, WonRoundEvent))
       else:
         echo "NOT HANDLED BOT TICK EVENT: ", event
-    
+
   of gameAbortedEvent:
     stop bot
 
@@ -204,7 +213,7 @@ proc handleMessage(bot:Bot, json_message:string) =
 
   of skippedTurnEvent:
     let skipped_turn_event = (SkippedTurnEvent)message
-    
+
     # activating the bot method
     bot.onSkippedTurn(skipped_turn_event)
 
@@ -224,9 +233,9 @@ proc handleMessage(bot:Bot, json_message:string) =
     # activating the bot method
     bot.onRoundStarted(round_started_event)
 
-  else: echo "NOT HANDLED MESSAGE: ",json_message
+  else: echo "NOT HANDLED MESSAGE: ", json_message
 
-proc botWorker(bot:Bot) {.thread.} =
+proc botWorker(bot: Bot) {.thread.} =
   bot.botReady = true
 
   # While the bot is connected to the server the bot thread should live
@@ -252,11 +261,12 @@ proc botWorker(bot:Bot) {.thread.} =
         while isRunning(bot) and bot.connected:
           go bot
 
-proc conectionHandler(bot:Bot) {.async.} =
+proc conectionHandler(bot: Bot) {.async.} =
   try:
-    echo "[",bot.name,".conectionHandler] trying to connect to ", bot.serverConnectionURL
+    echo "[", bot.name, ".conectionHandler] trying to connect to ",
+        bot.serverConnectionURL
     var ws = await newWebSocket(bot.serverConnectionURL)
-    echo "[",bot.name,".conectionHandler] connected..."
+    echo "[", bot.name, ".conectionHandler] connected..."
 
     proc writer() {.async.} =
       ## Loops while socket is open, looking for messages to write
@@ -291,7 +301,7 @@ proc conectionHandler(bot:Bot) {.async.} =
     botWorkerChan.send("QUIT")
     customConditionsWorkerChan.send("QUIT")
 
-proc timeout(bot:Bot, s:int) {.async.} =
+proc timeout(bot: Bot, s: int) {.async.} =
   await sleepAsync(s * 1000)
   if(not bot.connected):
     echo "timeout"
@@ -299,19 +309,20 @@ proc timeout(bot:Bot, s:int) {.async.} =
     customConditionsWorkerChan.send("QUIT")
 
 
-proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialPosition(x:0,y:0,angle:0)) =
+proc startBot*(bot: Bot, connect: bool = true,
+    position: InitialPosition = InitialPosition(x: 0, y: 0, angle: 0)) =
   ## **Start the bot**
-  ## 
+  ##
   ## This method is used to start the bot instance. This coincide with asking the bot to connect to the game server
-  ## 
+  ##
   ## `bot` is the new and current bot istance
-  ## 
+  ##
   ## `connect` (can be omitted) is a boolean value that if `true` (default) will ask the bot to connect to the game server.
   ## If `false` the bot will not connect to the game server. Mostly used for testing.
-  ## 
+  ##
   ## `position` (can be omitted) is the initial position of the bot. If not specified the bot will be placed at the center of the map.
   ## This custom position will work if the server is configured to use the custom initial positions
-  
+
   # set the initial position, is the server that will decide to use it or not
   bot.initialPosition = position
 
@@ -329,7 +340,7 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
     if bot.secret == "":
       bot.secret = getEnv("SERVER_SECRET", "serversecret")
 
-    if bot.serverConnectionURL == "": 
+    if bot.serverConnectionURL == "":
       bot.serverConnectionURL = getEnv("SERVER_URL", "ws://localhost:7654")
 
     # runners for the botWorker and customConditionsWorker
@@ -342,9 +353,9 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
     createThread customConditionsRunner, customConditionsWorker, bot
 
     # wait for the threads to be ready
-    echo "[",bot.name,".startBot] waiting for bot and intent threads to be ready"
+    echo "[", bot.name, ".startBot] waiting for bot and intent threads to be ready"
     while not bot.botReady: sleep(100)
-    echo "[",bot.name,".startBot] bot threads are ready: ", bot.botReady
+    echo "[", bot.name, ".startBot] bot threads are ready: ", bot.botReady
 
     # start a timeout, in seconds, if the bot is not connected in time we quit
     asyncCheck bot.timeout(10)
@@ -362,6 +373,6 @@ proc startBot*(bot:Bot, connect:bool = true, position:InitialPosition = InitialP
   customConditionsWorkerChan.close()
   waitForWorkerChan.close()
   # sendMessage_channel.close()
-    
-  echo "[",bot.name,".startBot]connection ended and bot thread finished. Bye!"
-  echo "[",bot.name,".startBot] skipped turns: ", skipped
+
+  echo "[", bot.name, ".startBot]connection ended and bot thread finished. Bye!"
+  echo "[", bot.name, ".startBot] skipped turns: ", skipped
