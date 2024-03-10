@@ -5,6 +5,10 @@ This should describe what I think should be (or help me find out) the best way t
 sequenceDiagram
     participant SERVER
     participant LIB
+    participant BOT
+    participant IntentSender
+    participant BotRunner
+
     activate SERVER
     Note over BOT: the user starts the bot <br> by activating the library
     activate BOT
@@ -17,60 +21,77 @@ sequenceDiagram
     Note over LIB: listening for events <br> from the server
 
     SERVER--)LIB: roundStarted-event
-    activate LIB
 
     LIB--)BOT: onRoundStarted(event)
     activate BOT
     deactivate BOT
 
-    LIB--)THREAD: create a new thread
-    deactivate LIB
-    activate THREAD
+    LIB--)BotRunner: create a new botRunner
 
-    THREAD->>BOT: run()
+    activate BotRunner
+    Note over BotRunner: START
+    BotRunner->>BOT: BOT custom run()
+    deactivate BotRunner
     activate BOT
-    
-    loop Every turn/tick <br> loops indefenitely while bot is RUNNING
-        BOT->>LIB:go()
-        activate LIB
-        LIB--)SERVER: bot intent
-        Note over LIB: wait until NEXT_TURN before returning
-        LIB->>BOT: Go() return
-        deactivate LIB
+
+    loop usually doesn't return until RUNNING is true
+        opt BOT can call for a go() at any time
+            BOT->>IntentSender: go()
+            activate IntentSender
+            IntentSender--)LIB: sendIntent()
+            Note over IntentSender: wait NEXT_TURN
+            IntentSender->>BOT: return go()
+            deactivate IntentSender
+        end
     end
 
-
-    BOT->>THREAD: run() return
+    BOT->>BotRunner: return BOT custom run()
     deactivate BOT
+    activate BotRunner
 
-    loop Every turn/tick <br> loops definitely while bot is RUNNING
-        THREAD->>LIB: Go()
-        activate LIB
-        LIB--)SERVER: bot intent
-        Note over LIB: wait until NEXT_TURN before returning
-        LIB->>THREAD: Go() return
-        deactivate LIB
+    loop while bot is RUNNING
+        BotRunner->>IntentSender: go()
+        deactivate BotRunner
+        activate IntentSender
+        IntentSender--)LIB: sendIntent()
+        Note over IntentSender: wait NEXT_TURN
+        IntentSender->>BotRunner: return go()
+        deactivate IntentSender
     end
-    deactivate THREAD    
-    Note over THREAD: @bot is NOT RUNNING<br>EXIT
 
-    SERVER--)LIB: tick-event (NEXT_TURN arrived)
+    Note over BotRunner: EXIT
 
-    SERVER--)LIB: bot-death-event <br> won-round-event <br> game-aborted-event <br> game-ended-event <br> round-ended-event
-    LIB--)BOT: onDeath(event) <br> onRoundWon(event) <br> onGameAborted(event) <br> onGameEnded(event) <br> onRoundEnded(event)
-    activate BOT
-    deactivate BOT
-    Note over LIB: all these end the bot RUNNING
+    SERVER--)LIB: tick-event
+    Note over LIB: notify NEXT_TURN
 
-    opt Generic event
+    opt Events that can occur anytime
+        SERVER--)LIB: bot-death-event <br> won-round-event <br> game-aborted-event <br> game-ended-event <br> round-ended-event
+        Note over SERVER,LIB: all these set RUNNING to false
+        LIB--)BOT: onDeath(event) <br> onRoundWon(event) <br> onGameAborted(event) <br> onGameEnded(event) <br> onRoundEnded(event)
+        activate BOT
+        deactivate BOT
+
         SERVER--)LIB: generic-event
         LIB--)BOT: onGenericMethod(generic-event)
         activate BOT
-    deactivate BOT
+        deactivate BOT
+    end
+
+    opt BOT can call for a go() at any time
+        BOT->>IntentSender: go()
+        activate IntentSender
+        IntentSender--)LIB: sendIntent()
+        Note over IntentSender: wait NEXT_TURN
+        IntentSender->>BOT: return go()
+        deactivate IntentSender
     end
 
     deactivate LIB
     deactivate SERVER
 
-    Note over LIB: @any moment<br>as the connection is lost<br>the bot will leave the game and will close
+    Note over SERVER,LIB: @any moment<br>as the CONNECTION is false<br>the bot will leave the game and will close
+    LIB--)BOT: onDisconnectMethod(disconnect-event)
+    activate BOT
+    deactivate BOT
+    LIB--)BotRunner: send STOP
 ```
