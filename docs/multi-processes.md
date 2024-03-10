@@ -5,7 +5,7 @@ This should describe what I think should be (or help me find out) the best way t
 sequenceDiagram
     participant SERVER
     participant LIB
-    participant BOT
+    actor BOT
     participant IntentSender
     participant BotRunner
 
@@ -26,10 +26,17 @@ sequenceDiagram
     activate BOT
     deactivate BOT
 
-    LIB--)BotRunner: create a new botRunner
-
+    LIB--)BotRunner: create a new BotRunner
     activate BotRunner
+    
+    LIB--)IntentSender: create a new IntentSender
+    activate IntentSender
+
     Note over BotRunner: START
+    Note over IntentSender: START
+    IntentSender->>IntentSender: wait GO
+    deactivate IntentSender
+
     BotRunner->>BOT: BOT custom run()
     deactivate BotRunner
     activate BOT
@@ -37,10 +44,13 @@ sequenceDiagram
     loop usually doesn't return until RUNNING is true
         opt BOT can call for a go() at any time
             BOT->>IntentSender: go()
+            deactivate BOT
             activate IntentSender
             IntentSender--)LIB: sendIntent()
-            Note over IntentSender: wait NEXT_TURN
+            IntentSender->>IntentSender: wait NEXT_TURN
             IntentSender->>BOT: return go()
+            activate BOT
+            IntentSender->>IntentSender: while is RUNNING <br> wait GO
             deactivate IntentSender
         end
     end
@@ -54,19 +64,19 @@ sequenceDiagram
         deactivate BotRunner
         activate IntentSender
         IntentSender--)LIB: sendIntent()
-        Note over IntentSender: wait NEXT_TURN
+        IntentSender->>IntentSender: wait NEXT_TURN
         IntentSender->>BotRunner: return go()
+        IntentSender->>IntentSender: while is RUNNING <br> wait GO
         deactivate IntentSender
     end
 
-    Note over BotRunner: EXIT
 
     SERVER--)LIB: tick-event
     Note over LIB: notify NEXT_TURN
 
     opt Events that can occur anytime
         SERVER--)LIB: bot-death-event <br> won-round-event <br> game-aborted-event <br> game-ended-event <br> round-ended-event
-        Note over SERVER,LIB: all these set RUNNING to false
+        Note over SERVER,LIB: all these <br> set RUNNING to false
         LIB--)BOT: onDeath(event) <br> onRoundWon(event) <br> onGameAborted(event) <br> onGameEnded(event) <br> onRoundEnded(event)
         activate BOT
         deactivate BOT
@@ -81,17 +91,24 @@ sequenceDiagram
         BOT->>IntentSender: go()
         activate IntentSender
         IntentSender--)LIB: sendIntent()
-        Note over IntentSender: wait NEXT_TURN
+        IntentSender->>IntentSender: wait NEXT_TURN
         IntentSender->>BOT: return go()
+        IntentSender->>IntentSender: while is RUNNING <br> wait GO
         deactivate IntentSender
     end
 
-    deactivate LIB
-    deactivate SERVER
-
     Note over SERVER,LIB: @any moment<br>as the CONNECTION is false<br>the bot will leave the game and will close
+    Note over LIB: set RUNNING to false
     LIB--)BOT: onDisconnectMethod(disconnect-event)
     activate BOT
     deactivate BOT
-    LIB--)BotRunner: send STOP
+
+    deactivate LIB
+
+    Note over LIB: EXIT
+    Note over IntentSender: EXIT when RUNNING is false
+    Note over BotRunner: EXIT when RUNNING is false
+    Note over SERVER: unknown status
+   
+    deactivate SERVER
 ```
