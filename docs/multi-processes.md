@@ -97,8 +97,7 @@ sequenceDiagram
         deactivate IntentSender
     end
 
-    Note over SERVER,LIB: @any moment<br>as the CONNECTION is false<br>the bot will leave the game and will close
-    Note over LIB: set RUNNING to false
+    Note over LIB: @any moment<br>as the CONNECTION is false <br> set RUNNING to false <br> and the bot will EXIT
     LIB--)BOT: onDisconnectMethod(disconnect-event)
     activate BOT
     deactivate BOT
