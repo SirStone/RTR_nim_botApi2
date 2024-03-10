@@ -34,7 +34,7 @@ sequenceDiagram
 
     Note over BotRunner: START
     Note over IntentSender: START
-    IntentSender->>IntentSender: wait GO
+    IntentSender->>IntentSender: while is RUNNING <br> wait GO
     deactivate IntentSender
 
     BotRunner->>BOT: BOT custom run()
