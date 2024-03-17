@@ -1,7 +1,7 @@
 import streams
 
 # Package
-version       = "0.14.0"
+version       = "0.15.0"
 author        = "SirStone"
 description   = "Version2 of this library, for nim2.0"
 license       = "GPL-3.0-only"
@@ -14,7 +14,7 @@ requires "jsony >= 0.1.0"
 requires "ws >= 0.5.0"
 
 # Robocode Tank Royale Version/Tag
-let RTR_Version = "v0.19.3"
+let RTR_Version = "v0.22.1"
 
 # Robocode Tank Royale github repo
 let RTR_repo = "robocode-dev/tank-royale"

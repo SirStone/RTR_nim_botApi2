@@ -36,7 +36,7 @@ type
     botReady*: bool = false
     listenerReady*: bool = false
     intentReady*: bool = false
-    running*: bool = false
+    running: bool = false
     connected*: bool = false
     messagesToSend* = newSeq[string]()
 
@@ -86,8 +86,11 @@ var gunLocked*: bool = false
 var movingLocked*: bool = false
 var lastbotIntentTurn: int = -1
 var messagesSeqLock*: Lock
-var customConditionsLock*: Lock
-var customConditions* = newSeq[Condition]()
+var runningLock*: Lock
+
+# channels
+var botWorkerChan*: Channel[string]
+var nextTurn*: Channel[string]
 
 #++++++++ GAME PHYSICS ++++++++#
 # bots accelerate at the rate of 1 unit per turn but decelerate at the rate of 2 units per turn
@@ -112,99 +115,115 @@ let MAX_FIRE_POWER: float = 3
 let MIN_FIRE_POWER: float = 0.1
 
 #++++++++ REMAININGS ++++++++#
-var remaining_turnRate: float = 0
-var remaining_turnGunRate: float = 0
-var remaining_turnRadarRate: float = 0
+var remaining_turn: float = 0
+var remaining_gunTurn: float = 0
+var remaining_radarTurn: float = 0
 var remaining_distance: float = 0
 
 #++++++++ BOT UPDATES ++++++++#
-var turnRate_done*: float = 0
-var gunTurnRate_done*: float = 0
-var radarTurnRate_done*: float = 0
+var turn_done*: float = 0
+var gunTurn_done*: float = 0
+var radarTurn_done*: float = 0
 var distance_done*: float = 0
 
+#+++++++++++++ BOT RATES +++++++++++++#
+# var radarTurnRate*: float = 0
+# var gunTurnRate*: float = 0
+# var turnRate*: float = 0
+# var targetSpeed*: float = 0
+
 proc resetIntent(bot: Bot) =
-  bot.intent.turnRate = 0
-  bot.intent.gunTurnRate = 0
-  bot.intent.radarTurnRate = 0
-  bot.intent.targetSpeed = 0
   bot.intent.rescan = false
   bot.intent.stdOut = ""
   bot.intent.stdErr = ""
 
+proc isNearZero(value: float): bool =
+  return abs(value) < 0.00001
+
 proc updateRemainings(bot: Bot) =
   # body turn
-  if remaining_turnRate != 0:
-    remaining_turnRate = (remaining_turnRate - turnRate_done).round(13)
-    bot.intent.turnRate = remaining_turnRate
-  else:
-    bot.intent.turnRate = 0
+  if remaining_turn != 0:
+    remaining_turn = remaining_turn - turn_done
+    if (isNearZero(remaining_turn)):
+      remaining_turn = 0
+      bot.intent.turnRate = 0
+    else:
+      bot.intent.turnRate = clamp(remaining_turn, -MAX_TURN_RATE, MAX_TURN_RATE)
 
   # gun turn
-  if remaining_turnGunRate != 0:
-    remaining_turnGunRate = (remaining_turnGunRate - gunTurnRate_done).round(13)
-    bot.intent.gunTurnRate = remaining_turnGunRate
-  else:
-    bot.intent.gunTurnRate = 0
+  if remaining_gunTurn != 0:
+    remaining_gunTurn = remaining_gunTurn - gunTurn_done
+    if (isNearZero(remaining_gunTurn)):
+      remaining_gunTurn = 0
+      bot.intent.gunTurnRate = 0
+    else:
+      bot.intent.gunTurnRate = clamp(remaining_gunTurn, -MAX_GUN_TURN_RATE, MAX_GUN_TURN_RATE)
 
   # radar turn
-  if remaining_turnRadarRate != 0:
-    remaining_turnRadarRate = (remaining_turnRadarRate -
-        radarTurnRate_done).round(13)
-    bot.intent.radarTurnRate = remaining_turnRadarRate
-  else:
-    bot.intent.radarTurnRate = 0
+  if remaining_radarTurn != 0:
+    remaining_radarTurn = remaining_radarTurn - radarTurn_done
+    if (isNearZero(remaining_radarTurn)):
+      remaining_radarTurn = 0
+      bot.intent.radarTurnRate = 0
+    else:
+      bot.intent.radarTurnRate = clamp(remaining_radarTurn, -MAX_RADAR_TURN_RATE, MAX_RADAR_TURN_RATE)
 
   # target speed calculation
   if remaining_distance != 0:
-    remaining_distance = (remaining_distance - distance_done).round(13)
-    bot.intent.targetSpeed = remaining_distance
-  else:
-    bot.intent.targetSpeed = 0
+    remaining_distance = remaining_distance - distance_done
+    if (isNearZero(remaining_distance)):
+      remaining_distance = 0
+      bot.intent.targetSpeed = 0
+    else:
+      bot.intent.targetSpeed = clamp(remaining_distance, -current_maxSpeed, current_maxSpeed)
 
-proc isRunning*(bot: Bot): bool = bot.running
+proc isRunning*(bot: Bot): bool = {.locks: [runningLock].}: bot.running
 
 proc stop*(bot: Bot) =
-  bot.running = false
-  bot.first_tick = true
-  resetIntent bot
+  {.locks: [runningLock].}: bot.running = false
+  nextTurn.send("")
 
 proc start*(bot: Bot) =
-  bot.running = true
-  bot.first_tick = false
-  resetIntent bot
+  {.locks: [runningLock].}: bot.running = true
+  bot.first_tick = true
 
 proc go*(bot: Bot) =
-  # Sending intent to server if the last turn we sent it is different from the current turn
-  if bot.turnNumber == lastbotIntentTurn: return
-
   # update the last turn we sent the intent
   lastbotIntentTurn = bot.turnNumber
 
   # update the reaminings
   updateRemainings bot
 
-  # signal to send the intent to the game server
+  # send the intent
   {.locks: [messagesSeqLock].}: bot.messagesToSend.add(bot.intent.toJson)
+
   # reset the intent for the next turn
   resetIntent bot
+
+  # wait for next turn
+  discard nextTurn.recv()
+
+#+++++++++++++ BATTLEFIELD ++++++++++++++#
+proc getBattlefieldHeight*(bot: Bot): float =
+  ## returns the battlefield height (vertical)
+  return (float)bot.gameSetup.arenaHeight
+
+proc getBattlefieldWidth*(bot: Bot): float =
+  ## returns the battlefield width (horizontal)
+  return (float)bot.gameSetup.arenaWidth
 
 #++++++++ BOT HIT BOT EVENT ++++++++#
 proc isRammed*(event: BotHitBotEvent): bool =
   ## returns true if the bot is ramming another bot
   return event.rammed
 
-#++++++++ CUSTOM CONDITIONS ++++++++#
-proc waitFor*(bot: Bot, condition: Condition) =
-  # go until the bot is not running or the remaining_turnRadarRate is 0
-  {.gcsafe.}:
-    while bot.isRunning and not condition.test(bot):
-      go bot
-
 #++++++++ BOT HEALTH ++++++++#
 proc getEnergy*(bot: Bot): float =
   ## returns the current energy of the bot
-  return bot.botState.energy
+  if bot.botState == nil:
+    return 100
+  else:
+    return bot.botState.energy
 
 #++++++++ BOT SETUP +++++++++#
 proc setAdjustGunForBodyTurn*(bot: Bot, adjust: bool) =
@@ -342,52 +361,9 @@ proc getY*(bot: Bot): float =
   return bot.botState.y
 
 #++++++++ TURNING RADAR +++++++++#
-proc setRadarTurnRate*(bot: Bot, degrees: float) =
-  ## set the radar turn rate if the bot is not locked doing a blocking call
-  ##
-  ## **OVERRIDES CURRENT VALUE**
-  remaining_turnRadarRate = degrees
-
-proc setTurnRadarLeft*(bot: Bot, degrees: float) =
-  ## set the radar to turn left by `degrees` if the bot is not locked doing a blocking call
-  ##
-  ## **OVERRIDES CURRENT VALUE**
-  remaining_turnRadarRate = degrees
-
-proc setTurnRadarRight*(bot: Bot, degrees: float) =
-  ## set the radar to turn right by `degrees` if the bot is not locked doing a blocking call
-  ##
-  ## **OVERRIDES CURRENT VALUE**
-  bot.setTurnRadarLeft(-degrees)
-
-proc turnRadarLeft*(bot: Bot, degrees: float) =
-  ## turn the radar left by `degrees` if the bot is not locked doing another blocking call
-  ##
-  ## **BLOCKING CALL**
-
-  if not radarLocked:
-    # ask to turnRadar left for all degrees, the server will take care of turnRadaring the bot the max amount of degrees allowed
-    bot.setTurnRadarLeft(degrees)
-
-    # lock the bot, no other actions must be done until the action is completed
-    radarLocked = true
-
-    # go until the bot is not running or the remaining_turnRadarRate is 0
-    while bot.isRunning and remaining_turnRadarRate != 0:
-      go bot
-
-    # unlock the bot
-    radarLocked = false
-
-proc turnRadarRight*(bot: Bot, degrees: float) =
-  ## turn the radar right by `degrees` if the bot is not locked doing another blocking call
-  ##
-  ## **BLOCKING CALL**
-  bot.turnRadarLeft(-degrees)
-
 proc getRadarTurnRemaining*(bot: Bot): float =
   ## returns the remaining radar turn rate in degrees
-  return remaining_turnRadarRate
+  return remaining_radarTurn
 
 proc getRadarDirection*(bot: Bot): float =
   ## returns the current radar direction in degrees
@@ -396,6 +372,49 @@ proc getRadarDirection*(bot: Bot): float =
 proc getMaxRadarTurnRate*(bot: Bot): float =
   ## returns the maximum turn rate of the radar in degrees
   return MAX_RADAR_TURN_RATE
+
+proc setRadarTurnRate*(bot: Bot, degrees: float) =
+  ## set the radar turn rate if the bot is not locked doing a blocking call
+  ##
+  ## **OVERRIDES CURRENT VALUE**
+  bot.intent.radarTurnRate = degrees
+
+proc setRadarTurnLeft*(bot: Bot, degrees: float) =
+  ## set the radar to turn left by `degrees` if the bot is not locked doing a blocking call
+  ##
+  ## **OVERRIDES CURRENT VALUE**
+  remaining_radarTurn = degrees
+
+proc setRadarTurnRight*(bot: Bot, degrees: float) =
+  ## set the radar to turn right by `degrees` if the bot is not locked doing a blocking call
+  ##
+  ## **OVERRIDES CURRENT VALUE**
+  bot.setRadarTurnLeft(-degrees)
+
+proc radarTurnLeft*(bot: Bot, degrees: float) =
+  ## turn the radar left by `degrees` if the bot is not locked doing another blocking call
+  ##
+  ## **BLOCKING CALL**
+
+  if not radarLocked:
+    # ask to radarTurn left for all degrees, the server will take care of radarTurning the bot the max amount of degrees allowed
+    bot.setRadarTurnLeft(degrees)
+
+    # lock the bot, no other actions must be done until the action is completed
+    radarLocked = true
+
+    # go until the bot is not running or the remaining_radarTurnRate is 0
+    while bot.isRunning and bot.getRadarTurnRemaining != 0:
+      go bot
+
+    # unlock the bot
+    radarLocked = false
+
+proc radarTurnRight*(bot: Bot, degrees: float) =
+  ## turn the radar right by `degrees` if the bot is not locked doing another blocking call
+  ##
+  ## **BLOCKING CALL**
+  bot.radarTurnLeft(-degrees)
 
 proc setRescan*(bot: Bot) =
   ## set the radar to rescan if the bot is not locked doing a blocking call
@@ -417,48 +436,48 @@ proc setGunTurnRate*(bot: Bot, degrees: float) =
   ## set the gun turn rate if the bot is not locked doing a blocking call
   ##
   ## **OVERRIDES CURRENT VALUE**
-  remaining_turnGunRate = degrees
+  bot.intent.gunTurnRate = degrees
 
-proc setTurnGunLeft*(bot: Bot, degrees: float) =
+proc setGunTurnLeft*(bot: Bot, degrees: float) =
   ## set the gun to turn left by `degrees` if the bot is not locked doing a blocking call
   ##
   ## **OVERRIDES CURRENT VALUE**
-  remaining_turnGunRate = degrees
+  remaining_gunTurn = degrees
 
-proc setTurnGunRight*(bot: Bot, degrees: float) =
+proc setGunTurnRight*(bot: Bot, degrees: float) =
   ## set the gun to turn right by `degrees` if the bot is not locked doing a blocking call
   ##
   ## **OVERRIDES CURRENT VALUE**
-  bot.setTurnGunLeft(-degrees)
+  bot.setGunTurnLeft(-degrees)
 
-proc turnGunLeft*(bot: Bot, degrees: float) =
+proc gunTurnLeft*(bot: Bot, degrees: float) =
   ## turn the gun left by `degrees` if the bot is not locked doing another blocking call
   ##
   ## **BLOCKING CALL**
 
-  # ask to turnGun left for all degrees, the server will take care of turnGuning the bot the max amount of degrees allowed
+  # ask to gunTurn left for all degrees, the server will take care of gunTurning the bot the max amount of degrees allowed
   if not gunLocked:
-    bot.setTurnGunLeft(degrees)
+    bot.setGunTurnLeft(degrees)
 
     # lock the bot, no other actions must be done until the action is completed
     gunLocked = true
 
-    # go until the bot is not running or the remaining_turnGunRate is 0
-    while bot.isRunning and remaining_turnGunRate != 0:
+    # go until the bot is not running or the remaining_gunTurnRate is 0
+    while bot.isRunning and remaining_gunTurn != 0:
       go bot
 
     # unlock the bot
     gunLocked = false
 
-proc turnGunRight*(bot: Bot, degrees: float) =
+proc gunTurnRight*(bot: Bot, degrees: float) =
   ## turn the gun right by `degrees` if the bot is not locked doing another blocking call
   ##
   ## **BLOCKING CALL**
-  bot.turnGunLeft(-degrees)
+  bot.gunTurnLeft(-degrees)
 
 proc getGunTurnRemaining*(bot: Bot): float =
   ## returns the remaining gun turn rate in degrees
-  return remaining_turnGunRate
+  return remaining_gunTurn
 
 proc getGunDirection*(bot: Bot): float =
   ## returns the current gun direction in degrees
@@ -473,18 +492,18 @@ proc getGunHeat*(bot: Bot): float =
 
 
 #++++++++ TURNING BODY +++++++#
-# proc setTurnRate(bot:Bot, degrees:float) =
-#   ## set the body turn rate if the bot is not locked doing a blocking call
-#   ##
-#   ## **OVERRIDES CURRENT VALUE**
-#   if not botLocked:
-#     remaining_turnRate = degrees
+## TODO: maybe this needs some rethink
+proc setTurnRate*(bot:Bot, degrees:float) =
+  ## set the body turn rate if the bot is not locked doing a blocking call
+  ##
+  ## **OVERRIDES CURRENT VALUE**
+  bot.intent.turnRate = degrees
 
 proc setTurnLeft*(bot: Bot, degrees: float) =
   ## set the body to turn left by `degrees` if the bot is not locked doing a blocking call
   ##
   ## **OVERRIDES CURRENT VALUE**
-  remaining_turnRate = degrees
+  remaining_turn = degrees
 
 proc setTurnRight*(bot: Bot, degrees: float) =
   ## set the body to turn right by `degrees` if the bot is not locked doing a blocking call
@@ -505,7 +524,7 @@ proc turnLeft*(bot: Bot, degrees: float) =
     turningLocked = true
 
     # go until the bot is not running or the remaining_turnRate is 0
-    while bot.isRunning and remaining_turnRate != 0:
+    while bot.isRunning and remaining_turn != 0:
       go bot
 
     # unlock the bot
@@ -519,7 +538,7 @@ proc turnRight*(bot: Bot, degrees: float) =
 
 proc getTurnRemaining*(bot: Bot): float =
   ## returns the remaining body turn rate in degrees
-  return remaining_turnRate
+  return remaining_turn
 
 proc getDirection*(bot: Bot): float =
   ## returns the current body direction in degrees
@@ -538,12 +557,11 @@ proc setTargetSpeed*(bot: Bot, speed: float) =
   ## by default ``max speed`` is ``8 pixels per turn``
   ##
   ## **OVERRIDES CURRENT VALUE**
-  if speed > 0:
-    bot.intent.targetSpeed = min(speed, current_maxSpeed)
-  elif speed < 0:
-    bot.intent.targetSpeed = max(speed, -current_maxSpeed)
-  else:
-    bot.intent.targetSpeed = speed
+  bot.intent.targetSpeed = clamp(speed, -current_maxSpeed, current_maxSpeed)
+
+proc getTargetSpeed*(bot: Bot): float =
+  ## returns the target speed of the bot
+  return bot.intent.targetSpeed
 
 proc setForward*(bot: Bot, distance: float) =
   ## set the bot to move forward by `distance` if the bot is not locked doing a blocking call

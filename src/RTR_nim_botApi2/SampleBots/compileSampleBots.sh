@@ -44,8 +44,8 @@ compileBot() {
     echo "Compiling $botName"
     sampleBotOutputDir="../../../bin/SampleBots/$botName"
     mkdir -p "$sampleBotOutputDir"
-    nim c -d:release -d:danger --outDir:"$sampleBotOutputDir" "./$botName/$botName.nim" #for release 
-    # nim c --outDir:"$sampleBotOutputDir" "./$botName/$botName.nim" #for debug
+    # nim c -d:release -d:danger --outDir:"$sampleBotOutputDir" "./$botName/$botName.nim" #for release 
+    nim c --outDir:"$sampleBotOutputDir" "./$botName/$botName.nim" #for debug
     
     # GOING FORWARD ONLY IF COMPILE IS OK
     if [ $? -eq 0 ]; then
