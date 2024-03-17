@@ -1,0 +1,19 @@
+{
+    "name": "CrashTest",
+    "version": "1.0.0",
+    "gameTypes": [
+        "melee",
+        "classic",
+        "1v1"
+    ],
+    "authors": [
+        "SirStone"
+    ],
+    "description": "Utility bot for testing. It's purpose is coded manually to fulfill any testing needs.",
+    "homepage": "",
+    "countryCodes": [
+        "it"
+    ],
+    "platform": "Linux/Windows/Mac",
+    "programmingLang": "NIM"
+}
