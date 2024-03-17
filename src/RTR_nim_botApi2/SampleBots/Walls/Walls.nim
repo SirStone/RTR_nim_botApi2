@@ -31,7 +31,7 @@ method run(bot:Bot) =
   
   # Turn the gun to turn right 90 degrees.
   peek = true
-  bot.turnGunRight(90)
+  bot.gunTurnRight(90)
   bot.turnRight(90)
 
   # Main loop

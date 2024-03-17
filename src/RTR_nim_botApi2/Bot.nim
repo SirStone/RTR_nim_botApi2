@@ -37,8 +37,8 @@ type
     listenerReady*: bool = false
     intentReady*: bool = false
     running: bool = false
-    connected*: bool = false
     messagesToSend* = newSeq[string]()
+    eventsQueue* = newSeq[string]()
 
   Bot* = ref object of BluePrint
 
@@ -87,10 +87,15 @@ var movingLocked*: bool = false
 var lastbotIntentTurn: int = -1
 var messagesSeqLock*: Lock
 var runningLock*: Lock
+var eventsQueueLock*: Lock
 
 # channels
 var botWorkerChan*: Channel[string]
 var nextTurn*: Channel[string]
+var eventsHandlerChan*: Channel[string]
+
+# connection
+var connected: bool = false
 
 #++++++++ GAME PHYSICS ++++++++#
 # bots accelerate at the rate of 1 unit per turn but decelerate at the rate of 2 units per turn
@@ -181,9 +186,15 @@ proc isRunning*(bot: Bot): bool = {.locks: [runningLock].}: bot.running
 
 proc stop*(bot: Bot) =
   {.locks: [runningLock].}: bot.running = false
+
+  # reset the intent to defualt
+  bot.intent = BotIntent(`type`: Type.botIntent)
+
   nextTurn.send("")
 
 proc start*(bot: Bot) =
+  bot.intent = BotIntent(`type`: Type.botIntent)
+  
   {.locks: [runningLock].}: bot.running = true
   bot.first_tick = true
 
@@ -202,6 +213,9 @@ proc go*(bot: Bot) =
 
   # wait for next turn
   discard nextTurn.recv()
+
+  stdout.write("-")
+  stdout.flushFile()
 
 #+++++++++++++ BATTLEFIELD ++++++++++++++#
 proc getBattlefieldHeight*(bot: Bot): float =
@@ -224,6 +238,15 @@ proc getEnergy*(bot: Bot): float =
     return 100
   else:
     return bot.botState.energy
+
+#++++++++ CONNECTION ++++++++#
+proc isConnected*(): bool =
+  ## returns true if the bot is connected to the server
+  return connected
+
+proc setConnected*(isConnected: bool) =
+  ## set the connection status
+  connected = isConnected
 
 #++++++++ BOT SETUP +++++++++#
 proc setAdjustGunForBodyTurn*(bot: Bot, adjust: bool) =
@@ -396,19 +419,12 @@ proc radarTurnLeft*(bot: Bot, degrees: float) =
   ##
   ## **BLOCKING CALL**
 
-  if not radarLocked:
-    # ask to radarTurn left for all degrees, the server will take care of radarTurning the bot the max amount of degrees allowed
-    bot.setRadarTurnLeft(degrees)
+  # ask to radarTurn left for all degrees, the server will take care of radarTurning the bot the max amount of degrees allowed
+  bot.setRadarTurnLeft(degrees)
 
-    # lock the bot, no other actions must be done until the action is completed
-    radarLocked = true
-
-    # go until the bot is not running or the remaining_radarTurnRate is 0
-    while bot.isRunning and bot.getRadarTurnRemaining != 0:
-      go bot
-
-    # unlock the bot
-    radarLocked = false
+  # go until the bot is not running or the remaining_radarTurnRate is 0
+  while bot.isRunning and bot.getRadarTurnRemaining != 0:
+    go bot
 
 proc radarTurnRight*(bot: Bot, degrees: float) =
   ## turn the radar right by `degrees` if the bot is not locked doing another blocking call
@@ -429,7 +445,6 @@ proc rescan*(bot: Bot) =
 
   # ask to rescan
   bot.setRescan()
-
 
 #++++++++ TURNING GUN +++++++++#
 proc setGunTurnRate*(bot: Bot, degrees: float) =
@@ -456,18 +471,11 @@ proc gunTurnLeft*(bot: Bot, degrees: float) =
   ## **BLOCKING CALL**
 
   # ask to gunTurn left for all degrees, the server will take care of gunTurning the bot the max amount of degrees allowed
-  if not gunLocked:
-    bot.setGunTurnLeft(degrees)
+  bot.setGunTurnLeft(degrees)
 
-    # lock the bot, no other actions must be done until the action is completed
-    gunLocked = true
-
-    # go until the bot is not running or the remaining_gunTurnRate is 0
-    while bot.isRunning and remaining_gunTurn != 0:
-      go bot
-
-    # unlock the bot
-    gunLocked = false
+  # go until the bot is not running or the remaining_gunTurnRate is 0
+  while bot.isRunning and remaining_gunTurn != 0:
+    go bot
 
 proc gunTurnRight*(bot: Bot, degrees: float) =
   ## turn the gun right by `degrees` if the bot is not locked doing another blocking call
@@ -489,7 +497,6 @@ proc getMaxGunTurnRate*(bot: Bot): float =
 proc getGunHeat*(bot: Bot): float =
   ## returns the current gun heat
   return bot.botState.gunHeat
-
 
 #++++++++ TURNING BODY +++++++#
 ## TODO: maybe this needs some rethink
@@ -516,19 +523,12 @@ proc turnLeft*(bot: Bot, degrees: float) =
   ##
   ## **BLOCKING CALL**
 
-  if not turningLocked:
-    # ask to turn left for all degrees, the server will take care of turning the bot the max amount of degrees allowed
-    bot.setTurnLeft(degrees)
+  # ask to turn left for all degrees, the server will take care of turning the bot the max amount of degrees allowed
+  bot.setTurnLeft(degrees)
 
-    # lock the bot, no other actions must be done until the action is completed
-    turningLocked = true
-
-    # go until the bot is not running or the remaining_turnRate is 0
-    while bot.isRunning and remaining_turn != 0:
-      go bot
-
-    # unlock the bot
-    turningLocked = false
+  # go until the bot is not running or the remaining_turnRate is 0
+  while bot.isRunning() and remaining_turn != 0:
+    bot.go()
 
 proc turnRight*(bot: Bot, degrees: float) =
   ## turn the body right by `degrees` if the bot is not locked doing another blocking call
@@ -563,6 +563,22 @@ proc getTargetSpeed*(bot: Bot): float =
   ## returns the target speed of the bot
   return bot.intent.targetSpeed
 
+proc getMaxSpeed*(bot: Bot): float =
+  ## returns the maximum speed of the bot
+  return MAX_SPEED
+
+proc getCurrentMaxSpeed*(bot: Bot): float =
+  ## returns the current maximum speed of the bot
+  return current_maxSpeed
+
+proc setCurrentMaxSpeed*(bot: Bot, speed: float) =
+  ## set the current maximum speed of the bot
+  ##
+  ## `speed` can be any value between ``0`` and ``+MAX_SPEED``, any value outside this range will be clamped
+  ##
+  ## **OVERRIDES CURRENT VALUE**
+  current_maxSpeed = clamp(speed, 0, MAX_SPEED)
+
 proc setForward*(bot: Bot, distance: float) =
   ## set the bot to move forward by `distance` if the bot is not locked doing a blocking call
   ##
@@ -586,19 +602,12 @@ proc forward*(bot: Bot, distance: float) =
   ##
   ## **BLOCKING CALL**
 
-  if not movingLocked:
-    # ask to move forward for all pixels (distance), the server will take care of moving the bot the max amount of pixels allowed
-    bot.setForward(distance)
+  # ask to move forward for all pixels (distance), the server will take care of moving the bot the max amount of pixels allowed
+  bot.setForward(distance)
 
-    # lock the bot, no other actions must be done until the action is completed
-    movingLocked = true
-
-    # go until the bot is not running or the remaining_turnRate is 0
-    while bot.isRunning and remaining_distance != 0:
-      go bot
-
-    # unlock the bot
-    movingLocked = false
+  # go until the bot is not running or the remaining_turnRate is 0
+  while bot.isRunning and remaining_distance != 0:
+    go bot
 
 proc back*(bot: Bot, distance: float) =
   ## move the bot back by `distance` if the bot is not locked doing another blocking call
@@ -657,11 +666,8 @@ proc fire*(bot: Bot, firepower: float) =
   ## If the `gun heat` is not 0 or if the `energy` is less than `firepower` the shot will not be fired
   ##
   # check if the bot is not locked and the bot is able to shoot
-  if not gunLocked:
-    gunLocked = true
-    if bot.setFire(firepower):
-      go bot
-    gunLocked = false
+  if bot.setFire(firepower):
+    go bot
 
 #++++++++++++++ UTILS ++++++++++++++#
 proc normalizeAbsoluteAngle*(angle: float): float =

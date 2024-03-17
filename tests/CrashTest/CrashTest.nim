@@ -1,5 +1,5 @@
 
-import math
+import std/math
 import ../../src/RTR_nim_botApi2    # import the bot api
 startBot newBot("CrashTest.json") # start the bot
 # --------------end, the rest is up to you--------------
@@ -24,18 +24,10 @@ method run(bot:Bot) =
   else:
     bot.turnRight(angle)
 
-  # move on the perimeter of the circle with the radius given
-  var distance_h = bot.getBattlefieldWidth() - bot.getX() - bot.getBattlefieldWidth() / 2 + radius  
-  bot.forward(distance_h)
-
-  # start circling around the center
-  var turning_angle = 5.0
-  var speed = 5.0
-  bot.setTurnRate(turning_angle)
-  bot.setTargetSpeed(speed)
+  # move forward
+  bot.setTargetSpeed(bot.getMaxSpeed())
 
   while bot.isRunning():
-    
     bot.go()
   
   echo "[",bot.name,"] stopping my run method now ", bot.getTurnNumber()
@@ -48,5 +40,20 @@ method onConnectionError(bot:Bot, error:string) =
   echo "[",bot.name,"] server url used:",bot.serverConnectionURL
   echo "[",bot.name,"] secret used:",bot.secret
 
-method onSkippedTurn(bot:Bot, e:SkippedTurnEvent) =
-  echo "[",bot.name,"] I skipped a turn ", e.turnNumber, " my energy:", bot.getEnergy()
+# method onSkippedTurn(bot:Bot, e:SkippedTurnEvent) =
+#   echo "[",bot.name,"] I skipped a turn ", e.turnNumber, " my energy:", bot.getEnergy()
+
+method onHitWall(bot:Bot, e:BotHitWallEvent) =
+  echo "[",bot.name,"] Wall hitted ", e.turnNumber, " my energy:", bot.getEnergy()
+
+  # stop forwarding
+  echo "[",bot.name,"] stopping forwarding"
+  bot.setTargetSpeed(0)
+
+  # turn 90 degrees to the right
+  echo "[",bot.name,"] turning right 90 degrees"
+  bot.turnRight(90)
+
+  # start moving forward again
+  echo "[",bot.name,"] moving forward again ", bot.getMaxSpeed()
+  bot.setTargetSpeed(bot.getMaxSpeed())
