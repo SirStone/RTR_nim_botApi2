@@ -1,8 +1,14 @@
-import std/[os, locks, strutils, math, random]
+import std/[os, locks, strutils, math, random, atomics]
 import ws, jsony, json, asyncdispatch
 import RTR_nim_botApi2/[Schemas, Bot]
 
 export Schemas, Bot, Condition 
+
+# constants
+const numberOfThreads = 3 # number of threads for event handling
+
+var webSocket: WebSocket
+var lastIntentTurn: int = -1
 
 # proc to b eused as logging stuff in the stdout
 proc log*(bot: Bot, msg: string) =
@@ -65,14 +71,12 @@ proc methodWorker(bot: Bot)  {.thread.} =
   var id = rand(1..1000)
 
   while true:
-    # echo "[", bot.name, ".methodWorker] waiting for message...", id
     # wait for the next available event
     let message = eventsHandlerChan.recv()
 
     case message:
     of "close": break
     else:
-      # echo "[", bot.name, ".methodWorker] received event: ", message, " in thread ", id
       let event = json2schema message
       case event.`type`:
       of botHitWallEvent:
@@ -99,10 +103,17 @@ proc methodWorker(bot: Bot)  {.thread.} =
       of wonRoundEvent:
         bot.onWonRound((WonRoundEvent)event)
       of botDeathEvent:
+        var botDeathEvent = (BotDeathEvent)event
+
+        # check if the dead bot is the current bot
+        if botDeathEvent.victimId == bot.myId:
+          # if the bot is dead we stop it
+          stop bot
+
+        # activating the bot method
         bot.onDeath((BotDeathEvent)event)
       else:
         echo "[", bot.name, ".methodWorker] event: not handled ", event.`type`, " in thread ", id
-  echo "[", bot.name, ".methodWorker] method worker EXIT ", id
 
 proc handleMessage(bot: Bot, json_message: string) =
   # Convert the json to a Message object
@@ -114,8 +125,6 @@ proc handleMessage(bot: Bot, json_message: string) =
   elif message.`type` == Type.skippedTurnEvent:
     stdout.write("!")
     stdout.flushFile()
-  else:
-    echo "[", bot.name, ".handleMessage] received event: ", message.`type`
 
   # 'case' switch over type
   case message.`type`:
@@ -125,8 +134,9 @@ proc handleMessage(bot: Bot, json_message: string) =
         sessionId: server_handshake.sessionId, name: bot.name,
         version: bot.version, authors: bot.authors, secret: bot.secret,
         initialPosition: bot.initialPosition)
-    {.locks: [messagesSeqLock].}: bot.messagesToSend.add(bot_handshake.toJson)
+    # {.locks: [messagesSeqLock].}: bot.messagesToSend.add(bot_handshake.toJson)
     # sendMessage_channel.send(bot_handshake.toJson)
+    asyncCheck webSocket.send(bot_handshake.toJson)
 
   of gameStartedEventForBot:
     let game_started_event_for_bot = (GameStartedEventForBot)message
@@ -139,8 +149,9 @@ proc handleMessage(bot: Bot, json_message: string) =
     bot.onGameStarted(game_started_event_for_bot)
 
     # send bot ready
-    {.locks: [messagesSeqLock].}: bot.messagesToSend.add(BotReady(`type`: Type.botReady).toJson)
+    # {.locks: [messagesSeqLock].}: bot.messagesToSend.add(BotReady(`type`: Type.botReady).toJson)
     # sendMessage_channel.send(BotReady(`type`:Type.botReady).toJson)
+    asyncCheck webSocket.send(BotReady(`type`: Type.botReady).toJson)
 
   of tickEventForBot:
     let tick_event_for_bot = (TickEventForBot)message
@@ -189,9 +200,6 @@ proc handleMessage(bot: Bot, json_message: string) =
     for event in tick_event_for_bot.events:
       case parseEnum[Type](event["type"].getStr()):
       of Type.botDeathEvent:
-        # if the bot is dead we stop it
-        stop bot
-
         eventsHandlerChan.send($event)
       of Type.botHitWallEvent:
         # zero the distance remaining
@@ -263,38 +271,44 @@ proc handleMessage(bot: Bot, json_message: string) =
 
 proc conectionHandler(bot: Bot) {.async.} =
   try:
-    echo "[", bot.name, ".conectionHandler] trying to connect to ",
-        bot.serverConnectionURL
-    var ws = await newWebSocket(bot.serverConnectionURL)
-    echo "[", bot.name, ".conectionHandler] connected..."
+    webSocket = await newWebSocket(bot.serverConnectionURL)
 
     # signal the threads that the connection is ready
     setConnected(true)
 
     proc writer() {.async.} =
       ## Loops while socket is open, looking for messages to write
-      while ws.readyState == Open:
-        # if there are chat message we have not sent yet
-        # send them
-        {.locks: [messagesSeqLock].}:
-          while bot.messagesToSend.len > 0:
-            let message = bot.messagesToSend.pop()
-            # echo "[API.writer.",bot.name,"] sending message: ", message, " for turn ", bot.turnNumber
-            await ws.send(message)
+      while webSocket.readyState == Open:
 
-        # keep the async stuff happy we need to sleep some times
+        # continuoslly check if intent must be sent
+        if sendIntent.load() and bot.turnNumber != lastIntentTurn:
+          # update the reaminings
+          bot.updateRemainings()
+
+          let json_intent = bot.intent.toJson
+
+          await webSocket.send(json_intent)
+
+          # reset some intent values
+          bot.resetIntent()
+          
+          # update the last turn we sent the intent
+          lastIntentTurn = bot.turnNumber
+
+          stdout.write("-")
+          stdout.flushFile()
+
+        # keep the async dispatcher happy
         await sleepAsync(1)
 
     proc reader() {.async.} =
       # Loops while socket is open, looking for messages to read
-      while ws.readyState == Open:
+      while webSocket.readyState == Open:
         # this blocks
-        var packet = await ws.receiveStrPacket()
+        var packet = await webSocket.receiveStrPacket()
 
         if packet.isEmptyOrWhitespace(): continue
         
-        # echo "[API.reader.",bot.name,"] received message: ", packet
-
         handleMessage(bot, packet)
 
     # start a async fiber thingy
@@ -346,8 +360,8 @@ proc startBot*(bot: Bot, connect: bool = true,
     createThread botRunner, botWorker, bot
 
     # start multiple copies of the event handler
-    var methodWorkerThreads: array[3, Thread[bot.type]]
-    for i in 0..2:
+    var methodWorkerThreads: array[numberOfThreads, Thread[bot.type]]
+    for i in 0..numberOfThreads-1:
       createThread methodWorkerThreads[i], methodWorker, bot
 
     # start the connection handler and wait for it undefinitely
@@ -357,7 +371,7 @@ proc startBot*(bot: Bot, connect: bool = true,
     botWorkerChan.send("close")
 
     # send closing signal to the method worker threads
-    for i in 0..2:
+    for i in 0..numberOfThreads-1:
       eventsHandlerChan.send("close")
 
     # wait for the bot thread to finish

@@ -1,4 +1,4 @@
-import std/[os, locks, math]
+import std/[os, locks, math, atomics]
 import jsony
 import Schemas
 
@@ -84,10 +84,13 @@ var turningLocked*: bool = false
 var radarLocked*: bool = false
 var gunLocked*: bool = false
 var movingLocked*: bool = false
-var lastbotIntentTurn: int = -1
 var messagesSeqLock*: Lock
 var runningLock*: Lock
 var eventsQueueLock*: Lock
+
+#+++++++++ INTENT ++++++++++#
+var sendIntent*: Atomic[bool]
+sendIntent.store(false) #initial value
 
 # channels
 var botWorkerChan*: Channel[string]
@@ -96,6 +99,10 @@ var eventsHandlerChan*: Channel[string]
 
 # connection
 var connected: bool = false
+
+# actions lock
+var locked: Atomic[bool]
+locked.store(false)
 
 #++++++++ GAME PHYSICS ++++++++#
 # bots accelerate at the rate of 1 unit per turn but decelerate at the rate of 2 units per turn
@@ -137,7 +144,7 @@ var distance_done*: float = 0
 # var turnRate*: float = 0
 # var targetSpeed*: float = 0
 
-proc resetIntent(bot: Bot) =
+proc resetIntent*(bot: Bot) =
   bot.intent.rescan = false
   bot.intent.stdOut = ""
   bot.intent.stdErr = ""
@@ -145,7 +152,10 @@ proc resetIntent(bot: Bot) =
 proc isNearZero(value: float): bool =
   return abs(value) < 0.00001
 
-proc updateRemainings(bot: Bot) =
+proc updateRemainings*(bot: Bot) =
+  # set fire aasist to true
+  bot.intent.fireAssist = true
+
   # body turn
   if remaining_turn != 0:
     remaining_turn = remaining_turn - turn_done
@@ -199,23 +209,18 @@ proc start*(bot: Bot) =
   bot.first_tick = true
 
 proc go*(bot: Bot) =
-  # update the last turn we sent the intent
-  lastbotIntentTurn = bot.turnNumber
-
-  # update the reaminings
-  updateRemainings bot
+  if sendIntent.load(): return
 
   # send the intent
-  {.locks: [messagesSeqLock].}: bot.messagesToSend.add(bot.intent.toJson)
+  # {.locks: [messagesSeqLock].}: bot.messagesToSend.add(bot.intent.toJson)
+  sendIntent.store(true)
 
   # reset the intent for the next turn
-  resetIntent bot
+  # resetIntent bot
 
   # wait for next turn
   discard nextTurn.recv()
-
-  stdout.write("-")
-  stdout.flushFile()
+  sendIntent.store(false)
 
 #+++++++++++++ BATTLEFIELD ++++++++++++++#
 proc getBattlefieldHeight*(bot: Bot): float =
@@ -418,6 +423,12 @@ proc radarTurnLeft*(bot: Bot, degrees: float) =
   ## turn the radar left by `degrees` if the bot is not locked doing another blocking call
   ##
   ## **BLOCKING CALL**
+  
+  # if bot is locked the bot can't do other actions
+  if locked.load(): return
+
+  # else we lock it
+  locked.store(true)
 
   # ask to radarTurn left for all degrees, the server will take care of radarTurning the bot the max amount of degrees allowed
   bot.setRadarTurnLeft(degrees)
@@ -425,6 +436,9 @@ proc radarTurnLeft*(bot: Bot, degrees: float) =
   # go until the bot is not running or the remaining_radarTurnRate is 0
   while bot.isRunning and bot.getRadarTurnRemaining != 0:
     go bot
+
+  # unlock the bot
+  locked.store(false)
 
 proc radarTurnRight*(bot: Bot, degrees: float) =
   ## turn the radar right by `degrees` if the bot is not locked doing another blocking call
@@ -440,8 +454,6 @@ proc setRescan*(bot: Bot) =
 
 proc rescan*(bot: Bot) =
   ## rescan the radar if the bot is not locked doing another blocking call
-  ##
-  ## **BLOCKING CALL**
 
   # ask to rescan
   bot.setRescan()
@@ -469,6 +481,12 @@ proc gunTurnLeft*(bot: Bot, degrees: float) =
   ## turn the gun left by `degrees` if the bot is not locked doing another blocking call
   ##
   ## **BLOCKING CALL**
+  
+  # if bot is locked the bot can't do other actions
+  if locked.load(): return
+
+  # else we lock it
+  locked.store(true)
 
   # ask to gunTurn left for all degrees, the server will take care of gunTurning the bot the max amount of degrees allowed
   bot.setGunTurnLeft(degrees)
@@ -476,6 +494,9 @@ proc gunTurnLeft*(bot: Bot, degrees: float) =
   # go until the bot is not running or the remaining_gunTurnRate is 0
   while bot.isRunning and remaining_gunTurn != 0:
     go bot
+
+  # unlock the bot
+  locked.store(false)
 
 proc gunTurnRight*(bot: Bot, degrees: float) =
   ## turn the gun right by `degrees` if the bot is not locked doing another blocking call
@@ -522,6 +543,12 @@ proc turnLeft*(bot: Bot, degrees: float) =
   ## turn the body left by `degrees` if the bot is not locked doing another blocking call
   ##
   ## **BLOCKING CALL**
+  
+  # if bot is locked the bot can't do other actions
+  if locked.load(): return
+
+  # else we lock it
+  locked.store(true)
 
   # ask to turn left for all degrees, the server will take care of turning the bot the max amount of degrees allowed
   bot.setTurnLeft(degrees)
@@ -529,6 +556,9 @@ proc turnLeft*(bot: Bot, degrees: float) =
   # go until the bot is not running or the remaining_turnRate is 0
   while bot.isRunning() and remaining_turn != 0:
     bot.go()
+
+  # unlock the bot
+  locked.store(false)
 
 proc turnRight*(bot: Bot, degrees: float) =
   ## turn the body right by `degrees` if the bot is not locked doing another blocking call
@@ -601,6 +631,12 @@ proc forward*(bot: Bot, distance: float) =
   ## `distance` is in pixels
   ##
   ## **BLOCKING CALL**
+  
+  # if bot is locked the bot can't do other actions
+  if locked.load(): return
+
+  # else we lock it
+  locked.store(true)
 
   # ask to move forward for all pixels (distance), the server will take care of moving the bot the max amount of pixels allowed
   bot.setForward(distance)
@@ -608,6 +644,9 @@ proc forward*(bot: Bot, distance: float) =
   # go until the bot is not running or the remaining_turnRate is 0
   while bot.isRunning and remaining_distance != 0:
     go bot
+
+  # unlock the bot
+  locked.store(false)
 
 proc back*(bot: Bot, distance: float) =
   ## move the bot back by `distance` if the bot is not locked doing another blocking call
@@ -666,9 +705,19 @@ proc fire*(bot: Bot, firepower: float) =
   ## If the `gun heat` is not 0 or if the `energy` is less than `firepower` the shot will not be fired
   ##
   # check if the bot is not locked and the bot is able to shoot
+
+  # if bot is locked the bot can't do other actions
+  if locked.load(): return
+
+  # else we lock it
+  locked.store(true)
+
   if bot.setFire(firepower):
     go bot
 
+  # unlock the bot
+  locked.store(false)
+  
 #++++++++++++++ UTILS ++++++++++++++#
 proc normalizeAbsoluteAngle*(angle: float): float =
   ## normalize the angle to an absolute angle into the range [0,360]
