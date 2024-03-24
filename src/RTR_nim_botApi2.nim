@@ -45,11 +45,8 @@ proc setConnectionParameters*(bot: Bot, serverConnectionURL: string,
 
 proc botWorker(bot: Bot) {.thread.} =
   while true:
-    echo "[", bot.name, ".botWorker] waiting for message..."
     let message = botWorkerChan.recv()
 
-    echo "[", bot.name, ".botWorker] received message: ", message
-    
     case message:
     of "close": break
     of "run":
@@ -60,10 +57,8 @@ proc botWorker(bot: Bot) {.thread.} =
 
       # When the bot creator's 'run()' exits, if the bot is still runnning,
       # we send the intent automatically until the bot is stopped
-      echo "[", bot.name, ".botWorker] starting sending intent automatically..."
       while bot.isRunning():
         go bot
-    echo "BOT NOT RUNNING FROM NOW ",bot.getTurnNumber()
 
 proc methodWorker(bot: Bot)  {.thread.} =
   # random id for the thread
@@ -103,6 +98,8 @@ proc methodWorker(bot: Bot)  {.thread.} =
         bot.onScannedBot((ScannedBotEvent)event)
       of wonRoundEvent:
         bot.onWonRound((WonRoundEvent)event)
+      of botDeathEvent:
+        bot.onDeath((BotDeathEvent)event)
       else:
         echo "[", bot.name, ".methodWorker] event: not handled ", event.`type`, " in thread ", id
   echo "[", bot.name, ".methodWorker] method worker EXIT ", id
