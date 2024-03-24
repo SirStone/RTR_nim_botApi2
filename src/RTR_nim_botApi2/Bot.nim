@@ -1,4 +1,4 @@
-import std/[os, locks, math, atomics]
+import std/[os, math, atomics]
 import jsony
 import Schemas
 
@@ -35,10 +35,7 @@ type
     # usage during the games
     botReady*: bool = false
     listenerReady*: bool = false
-    intentReady*: bool = false
-    running: bool = false
-    messagesToSend* = newSeq[string]()
-    eventsQueue* = newSeq[string]()
+    running: Atomic[bool]
 
   Bot* = ref object of BluePrint
 
@@ -79,18 +76,8 @@ method onWonRound*(bot: BluePrint, wonRoundEvent: WonRoundEvent) {.base gcsafe.}
 method onCustomCondition*(bot: BluePrint,
     name: string) {.base gcsafe.} = discard
 
-#++++++++ system variables ++++++++#
-var turningLocked*: bool = false
-var radarLocked*: bool = false
-var gunLocked*: bool = false
-var movingLocked*: bool = false
-var messagesSeqLock*: Lock
-var runningLock*: Lock
-var eventsQueueLock*: Lock
-
 #+++++++++ INTENT ++++++++++#
 var sendIntent*: Atomic[bool]
-sendIntent.store(false) #initial value
 
 # channels
 var botWorkerChan*: Channel[string]
@@ -102,7 +89,6 @@ var connected: bool = false
 
 # actions lock
 var locked: Atomic[bool]
-locked.store(false)
 
 #++++++++ GAME PHYSICS ++++++++#
 # bots accelerate at the rate of 1 unit per turn but decelerate at the rate of 2 units per turn
@@ -138,12 +124,6 @@ var gunTurn_done*: float = 0
 var radarTurn_done*: float = 0
 var distance_done*: float = 0
 
-#+++++++++++++ BOT RATES +++++++++++++#
-# var radarTurnRate*: float = 0
-# var gunTurnRate*: float = 0
-# var turnRate*: float = 0
-# var targetSpeed*: float = 0
-
 proc resetIntent*(bot: Bot) =
   bot.intent.rescan = false
   bot.intent.stdOut = ""
@@ -151,6 +131,10 @@ proc resetIntent*(bot: Bot) =
 
 proc isNearZero(value: float): bool =
   return abs(value) < 0.00001
+
+proc notifyNextTurn*() =
+  ## This method is used to notify the bot that the next turn is ready
+  nextTurn.send("")
 
 proc updateRemainings*(bot: Bot) =
   # set fire aasist to true
@@ -192,31 +176,28 @@ proc updateRemainings*(bot: Bot) =
     else:
       bot.intent.targetSpeed = clamp(remaining_distance, -current_maxSpeed, current_maxSpeed)
 
-proc isRunning*(bot: Bot): bool = {.locks: [runningLock].}: bot.running
+proc isRunning*(bot: Bot): bool = bot.running.load()
 
 proc stop*(bot: Bot) =
-  {.locks: [runningLock].}: bot.running = false
+  bot.running.store(false)
 
   # reset the intent to defualt
   bot.intent = BotIntent(`type`: Type.botIntent)
 
-  nextTurn.send("")
+  notifyNextTurn() # this notify any hanged go() to remain in waiting
 
 proc start*(bot: Bot) =
   bot.intent = BotIntent(`type`: Type.botIntent)
   
-  {.locks: [runningLock].}: bot.running = true
+  bot.running.store(true)
+  locked.store(false)
+  sendIntent.store(false)
   bot.first_tick = true
 
 proc go*(bot: Bot) =
-  if sendIntent.load(): return
-
+  if sendIntent.load(): return # if the bot is already sending an intent, return
   # send the intent
-  # {.locks: [messagesSeqLock].}: bot.messagesToSend.add(bot.intent.toJson)
   sendIntent.store(true)
-
-  # reset the intent for the next turn
-  # resetIntent bot
 
   # wait for next turn
   discard nextTurn.recv()
@@ -706,17 +687,9 @@ proc fire*(bot: Bot, firepower: float) =
   ##
   # check if the bot is not locked and the bot is able to shoot
 
-  # if bot is locked the bot can't do other actions
-  if locked.load(): return
-
-  # else we lock it
-  locked.store(true)
-
+  # TODO does fire() ignores locked movements?
   if bot.setFire(firepower):
     go bot
-
-  # unlock the bot
-  locked.store(false)
   
 #++++++++++++++ UTILS ++++++++++++++#
 proc normalizeAbsoluteAngle*(angle: float): float =
