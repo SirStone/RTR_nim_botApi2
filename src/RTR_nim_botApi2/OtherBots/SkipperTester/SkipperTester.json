@@ -1,0 +1,14 @@
+{
+  "name": "SkipperTester",
+  "version": "1.0",
+  "authors": [
+    "SirStone"
+  ],
+  "description": "Tests for turn skipping while dead",
+  "homepage": "",
+  "countryCodes": [
+    "it"
+  ],
+  "platform": "NIM",
+  "programmingLang": "Nim 2.0"
+}
