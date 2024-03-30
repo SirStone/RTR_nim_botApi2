@@ -3,10 +3,9 @@ import jsony
 import Schemas
 
 type
-  # Condition object for custom conditons
-  Condition* = ref object of RootObj
-    name*: string                # the condition name
-    test*: proc (bot: Bot): bool # the condition function
+  Condition* = object
+    name*: string = "no name"
+    test*: proc(bot: Bot): bool
 
   BluePrint = ref object of RootObj
     # filled from JSON
@@ -52,7 +51,7 @@ proc newBot*(json_file: string): Bot =
     quit(1)
 
 # the following section contains all the methods that are supposed to be overrided by the bot creator
-method run*(bot: BluePrint) {.base gcsafe.} = discard # this method is called in a secondary thread
+method run*(bot: BluePrint) {.base gcsafe.} = discard
 method onBulletFired*(bot: BluePrint, bulletFiredEvent: BulletFiredEvent) {.base gcsafe.} = discard
 method onBulletHitBullet*(bot: BluePrint,
     bulletHitBulletEvent: BulletHitBulletEvent) {.base gcsafe.} = discard
@@ -70,11 +69,9 @@ method onScannedBot*(bot: BluePrint, scannedBotEvent: ScannedBotEvent) {.base gc
 method onTick*(bot: BluePrint, tickEventForBot: TickEventForBot) {.base gcsafe.} = discard
 method onDeath*(bot: BluePrint, botDeathEvent: BotDeathEvent) {.base gcsafe.} = discard
 method onConnect*(bot: BluePrint) {.base gcsafe.} = discard
-method onConnectionError*(bot: BluePrint,
-    error: string) {.base gcsafe.} = discard
+method onConnectionError*(bot: BluePrint, error: string) {.base gcsafe.} = discard
 method onWonRound*(bot: BluePrint, wonRoundEvent: WonRoundEvent) {.base gcsafe.} = discard
-method onCustomCondition*(bot: BluePrint,
-    name: string) {.base gcsafe.} = discard
+method onCustomCondition*(bot: BluePrint, name: string) {.base gcsafe.} = discard
 
 #+++++++++ INTENT ++++++++++#
 var sendIntent*: Atomic[bool]
@@ -123,6 +120,9 @@ var turn_done*: float = 0
 var gunTurn_done*: float = 0
 var radarTurn_done*: float = 0
 var distance_done*: float = 0
+
+proc console_log*(bot: Bot, msg: string) =
+  bot.intent.stdOut.add(msg & "\r\n")
 
 proc resetIntent*(bot: Bot) =
   bot.intent.rescan = false
@@ -195,7 +195,7 @@ proc start*(bot: Bot) =
   bot.first_tick = true
 
 proc go*(bot: Bot) =
-  if sendIntent.load(): return # if the bot is already sending an intent, return
+  if sendIntent.load() or not bot.isRunning(): return # if the bot is already sending an intent, return
   # send the intent
   sendIntent.store(true)
 
@@ -690,6 +690,17 @@ proc fire*(bot: Bot, firepower: float) =
   # TODO does fire() ignores locked movements?
   if bot.setFire(firepower):
     go bot
+
+#++++++++++++++ CUSTOM CONDITIONS ++++++++++++++#
+proc waitFor*(bot: Bot, condition: Condition) {.gcsafe.} =
+  ## wait for a custom condition to be true
+  ##
+  ## `condition` is the condition to wait for
+  ##
+  ## **BLOCKING CALL**
+  {.gcsafe.}:
+    while not condition.test(bot) and bot.isRunning():
+      go bot
   
 #++++++++++++++ UTILS ++++++++++++++#
 proc normalizeAbsoluteAngle*(angle: float): float =

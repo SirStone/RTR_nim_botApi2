@@ -14,7 +14,7 @@ startBot newBot("Target.json") # start the bot
 var trigger:int # Keeps track of when to move
 
 # Called when a new round is started -> initialize and do some movement
-method run(bot:Bot) =
+method run(bot:Bot) {.gcsafe.} =
   # set colors
   bot.setBodyColor("#FFFFFF")
   bot.setTurretColor("#FFFFFF")
@@ -24,7 +24,7 @@ method run(bot:Bot) =
   trigger = 80
 
   # Add a custom event named "trigger-hit"
-  bot.addCustomCondition("trigger-hit", proc(bot:Bot):bool = bot.getEnergy() <= trigger.float)
+  bot.addCustomCondition(Condition(name:"trigger-hit", test: proc(bot:Bot): bool = bot.getEnergy() <= trigger.float))
 
 method onCustomCondition(bot:Bot, name:string) =
   # Check if our custom event "trigger-hit" went off
@@ -33,7 +33,7 @@ method onCustomCondition(bot:Bot, name:string) =
     trigger -= 20
 
     # Print out energy level
-    echo "Ouch, down to ", bot.getEnergy() + 0.5, " energy."
+    bot.console_log("Ouch, down to " & $(bot.getEnergy() + 0.5) & " energy.")
 
     # Move around a bit
     bot.turnLeft(65);

@@ -2,21 +2,26 @@ import std/[os, strutils, math, random, atomics]
 import ws, jsony, json, asyncdispatch
 import RTR_nim_botApi2/[Schemas, Bot]
 
-export Schemas, Bot, Condition 
+export Schemas, Bot, Condition
 
 # constants
-const numberOfThreads = 4 # number of threads for event handling
+const numberOfThreads = 10 # number of threads for event handling
 
 var webSocket: WebSocket
 var lastIntentTurn: int = -1
 
-proc console_log*(bot: Bot, msg: string) =
-  stdout.writeLine msg
-  stdout.flushFile
-  bot.intent.stdOut.add(msg)
+# custom conditions
+var customConditionsQueue:seq[Condition] # list of conditions
 
-proc setConnectionParameters*(bot: Bot, serverConnectionURL: string,
-    secret: string) =
+proc addCustomCondition*(bot:Bot, customCondition: Condition) =
+  ## add a custom condition to the bot
+  ##
+  ## `name` is the name of the condition
+  ## `test` is the condition function
+  {.gcsafe.}:
+    customConditionsQueue.add(customCondition)
+
+proc setConnectionParameters*(bot: Bot, serverConnectionURL: string, secret: string) =
   ## **Set the connection parameters**
   ##
   ## This method is used to set the connection parameters for the bot to connect to the game server.
@@ -65,72 +70,74 @@ proc methodWorker(bot: Bot)  {.thread.} =
     # wait for the next available event
     let message = eventsHandlerChan.recv()
 
+    # if bot is dead, we ignore the event
+    if not bot.isRunning():
+      echo "bot is not running, ignoring event: ", message
+      continue
+
     case message:
     of "close": break
     else:
-      let event = json2schema message
-      case event.`type`:
-      of botHitWallEvent:
-        bot.setDistanceRemaining(0) # zero the distance remaining
-        bot.onHitWall((BotHitWallEvent)event) # activating the bot method
-      of bulletFiredEvent:
-        bot.intent.firePower = 0 # reset the firepower
-        bot.onBulletFired((BulletFiredEvent)event) # activating the bot method
-      of bulletHitBotEvent:
-        let bulletHitBotEvent = (BulletHitBotEvent)event # cast the event to the right type
-        # creating the HitByBulletEvent from the BulletHitBotEvent
-        let hitByBulletEvent = HitByBulletEvent(
-          `type`: Type.hitByBulletEvent,
-          bullet: bulletHitBotEvent.bullet,
-          damage: bulletHitBotEvent.damage,
-          energy: bulletHitBotEvent.energy
-        )
-        bot.onHitByBullet(hitByBulletEvent) # activating the bot method
-      of bulletHitBulletEvent:
-        bot.onBulletHitBullet((BulletHitBulletEvent)event) # activating the bot method
-      of bulletHitWallEvent:
-        bot.onBulletHitWall((BulletHitWallEvent)event) # activating the bot method
-      of botHitBotEvent:
-        bot.setDistanceRemaining(0) # zero the distance remaining
-        bot.onHitBot((BotHitBotEvent)event) # activating the bot method
-      of scannedBotEvent:
-        bot.onScannedBot((ScannedBotEvent)event) # activating the bot method
-      of wonRoundEvent:
-        bot.onWonRound((WonRoundEvent)event) # activating the bot method
-      of botDeathEvent:
-        var botDeathEvent = (BotDeathEvent)event # cast the event to the right type
-        if botDeathEvent.victimId == bot.myId: # check if my bot is dead
-          stop bot # stop the bot
-        bot.onDeath((BotDeathEvent)event) # activating the bot method
-      of gameAbortedEvent:
-        stop bot # stop the bot
-        bot.onGameAborted((GameAbortedEvent)event) # activating the bot method
-      of roundEndedEventForBot:
-        stop bot # stop the bot
-        bot.onRoundEnded((RoundEndedEventForBot)event) # activating the bot method
-      of roundStartedEvent: # activating the bot method
-        start bot # start the bot
-        bot.onRoundStarted((RoundStartedEvent)event) # activating the bot method
-      of gameStartedEventForBot:
-        bot.onGameStarted((GameStartedEventForBot)event) # activating the bot method
-      of serverHandshake: discard
-      of skippedTurnEvent:
-        bot.onSkippedTurn((SkippedTurnEvent)event) # activating the bot method
-      of tickEventForBot:
-        bot.onTick((TickEventForBot)event) # activating the bot method
-      else:
-        echo "[", bot.name, ".methodWorker] event: not handled ", event.`type`, " in thread ", id
+      try:
+        let event = json2schema message
+        case event.`type`:
+        of botHitWallEvent:
+          bot.setDistanceRemaining(0) # zero the distance remaining
+          bot.onHitWall((BotHitWallEvent)event) # activating the bot method
+        of bulletFiredEvent:
+          bot.intent.firePower = 0 # reset the firepower
+          bot.onBulletFired((BulletFiredEvent)event) # activating the bot method
+        of bulletHitBotEvent:
+          let bulletHitBotEvent = (BulletHitBotEvent)event # cast the event to the right type
+          # creating the HitByBulletEvent from the BulletHitBotEvent
+          let hitByBulletEvent = HitByBulletEvent(
+            `type`: Type.hitByBulletEvent,
+            bullet: bulletHitBotEvent.bullet,
+            damage: bulletHitBotEvent.damage,
+            energy: bulletHitBotEvent.energy
+          )
+          bot.onHitByBullet(hitByBulletEvent) # activating the bot method
+        of bulletHitBulletEvent:
+          bot.onBulletHitBullet((BulletHitBulletEvent)event) # activating the bot method
+        of bulletHitWallEvent:
+          bot.onBulletHitWall((BulletHitWallEvent)event) # activating the bot method
+        of botHitBotEvent:
+          bot.setDistanceRemaining(0) # zero the distance remaining
+          bot.onHitBot((BotHitBotEvent)event) # activating the bot method
+        of scannedBotEvent:
+          bot.onScannedBot((ScannedBotEvent)event) # activating the bot method
+        of wonRoundEvent:
+          bot.onWonRound((WonRoundEvent)event) # activating the bot method
+        of botDeathEvent:
+          bot.onDeath((BotDeathEvent)event) # activating the bot method
+        of gameAbortedEvent:
+          bot.onGameAborted((GameAbortedEvent)event) # activating the bot method
+        of roundEndedEventForBot:
+          bot.onRoundEnded((RoundEndedEventForBot)event) # activating the bot method
+        of roundStartedEvent: # activating the bot method
+          bot.onRoundStarted((RoundStartedEvent)event) # activating the bot method
+        of gameStartedEventForBot:
+          bot.onGameStarted((GameStartedEventForBot)event) # activating the bot method
+        of serverHandshake: discard
+        of skippedTurnEvent:
+          bot.onSkippedTurn((SkippedTurnEvent)event) # activating the bot method
+        of tickEventForBot:
+          bot.onTick((TickEventForBot)event) # activating the bot method
+        else:
+          echo "[", bot.name, ".methodWorker] event: not handled ", event.`type`, " in thread ", id
+      except jsony.JsonError:
+        bot.onCustomCondition(message) # activating the bot method
       
 proc handleMessage(bot: Bot, json_message: string) =
   # Convert the json to a Message object
   let message = json2schema json_message
 
-  if message.`type` == Type.tickEventForBot:
-    stdout.write("+")
-    stdout.flushFile()
-  elif message.`type` == Type.skippedTurnEvent:
-    stdout.write("!")
-    stdout.flushFile()
+  # if message.`type` == Type.tickEventForBot:
+  #   stdout.write("+")
+  #   stdout.flushFile()
+  # elif message.`type` == Type.skippedTurnEvent:
+  #   stdout.write("!")
+  #   stdout.flushFile()
 
   # 'case' switch over type
   case message.`type`:
@@ -151,6 +158,39 @@ proc handleMessage(bot: Bot, json_message: string) =
 
     # send bot ready
     asyncCheck webSocket.send(BotReady(`type`: Type.botReady).toJson)
+
+    bot.onGameStarted(game_started_event_for_bot) # activating the bot method
+
+  of roundStartedEvent:
+    # empty the custom conditions
+    customConditionsQueue = @[]
+
+    start bot # start the bot
+
+    # send the message to the method worker threads
+    eventsHandlerChan.send(json_message)
+
+  of botDeathEvent:
+    let botDeathEvent = (BotDeathEvent)message
+    if botDeathEvent.victimId == bot.myId: # check if my bot is dead
+      stop bot # stop the bot
+
+      bot.onDeath(botDeathEvent) # activating the bot method
+    else:
+      eventsHandlerChan.send(json_message)
+  
+  of gameAbortedEvent:
+    stop bot # stop the bot
+
+    bot.onGameAborted((GameAbortedEvent)message) # activating the bot method
+
+  of roundEndedEventForBot:
+    stop bot # stop the bot
+
+    bot.onRoundEnded((RoundEndedEventForBot)message) # activating the bot method
+
+  of gameEndedEventForBot:
+    bot.onGameEnded((GameEndedEventForBot)message) # activating the bot method
 
   of tickEventForBot:
     let tick_event_for_bot = (TickEventForBot)message
@@ -190,16 +230,20 @@ proc handleMessage(bot: Bot, json_message: string) =
       bot.turnNumber = tick_event_for_bot.turnNumber
       bot.roundNumber = tick_event_for_bot.roundNumber
 
+      eventsHandlerChan.send(json_message)
+
       notifyNextTurn()
     
     # for every event inside this tick call the relative event for the bot
     for event in tick_event_for_bot.events:
       eventsHandlerChan.send($event) # send the event to the method worker threads
 
-  else: discard
+    # start a thread for every condition check
+    for condition in customConditionsQueue:
+      if condition.test(bot):
+        eventsHandlerChan.send(condition.name)
 
-  # send the message to the method worker threads
-  eventsHandlerChan.send(json_message)
+  else: eventsHandlerChan.send(json_message)
 
 proc conectionHandler(bot: Bot) {.async.} =
   try:
@@ -227,8 +271,8 @@ proc conectionHandler(bot: Bot) {.async.} =
           # update the last turn we sent the intent
           lastIntentTurn = bot.turnNumber
 
-          stdout.write("-")
-          stdout.flushFile()
+          # stdout.write("-")
+          # stdout.flushFile()
 
         # keep the async dispatcher happy
         await sleepAsync(1)

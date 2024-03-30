@@ -12,7 +12,7 @@ startBot newBot("Crazy.json") # start the bot
 
 var movingForward:bool
 # Called when a new round is started -> initialize and do some movement
-method run(bot:Bot) =
+method run(bot:Bot) {.gcsafe.} =
   # set colors
   bot.setBodyColor("#00C800") #lime
   bot.setTurretColor("#009632") #green
@@ -70,3 +70,4 @@ method onHitBot(bot:Bot, event:BotHitBotEvent) =
   # If we're moving into the other bot, reverse!
   if event.isRammed():
     reverseDirection(bot)
+    
