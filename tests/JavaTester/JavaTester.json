@@ -1,0 +1,19 @@
+{
+    "name": "JavaTester",
+    "version": "1.0.0",
+    "gameTypes": [
+        "melee",
+        "classic",
+        "1v1"
+    ],
+    "authors": [
+        "SirStone"
+    ],
+    "description": "Utility bot for testing. It's purpose is to play with the java API to understand how it works.",
+    "homepage": "",
+    "countryCodes": [
+        "it"
+    ],
+    "platform": "Linux/Windows/Mac",
+    "programmingLang": "JAVA"
+}
