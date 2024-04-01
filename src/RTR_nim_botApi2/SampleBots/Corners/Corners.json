@@ -1,0 +1,19 @@
+{
+    "name": "Corners NIM",
+    "version": "1.0.0",
+    "gameTypes": [
+        "melee",
+        "classic",
+        "1v1"
+    ],
+    "authors": [
+        "SirStone"
+    ],
+    "description": "replica of the original Corners, computed in Nim",
+    "homepage": "",
+    "countryCodes": [
+        "it"
+    ],
+    "platform": "Linux",
+    "programmingLang": "NIM"
+}

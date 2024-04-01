@@ -14,7 +14,7 @@ requires "jsony >= 0.1.0"
 requires "ws >= 0.5.0"
 
 # Robocode Tank Royale Version/Tag
-let RTR_Version = "v0.22.1"
+let RTR_Version = "v0.22.2"
 
 # Robocode Tank Royale github repo
 let RTR_repo = "robocode-dev/tank-royale"
