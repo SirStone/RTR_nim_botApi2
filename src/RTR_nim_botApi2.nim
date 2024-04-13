@@ -5,7 +5,7 @@ import RTR_nim_botApi2/[Schemas, Bot]
 export Schemas, Bot, Condition
 
 # constants
-const numberOfThreads = 10 # number of threads for event handling
+const numberOfThreads = 1 # number of threads for event handling
 
 var webSocket: WebSocket
 var lastIntentTurn: int = -1
@@ -72,14 +72,21 @@ proc methodWorker(bot: Bot)  {.thread.} =
 
     # if bot is dead, we ignore the event
     if not bot.isRunning():
-      echo "bot is not running, ignoring event: ", message
+      # echo "bot is not running, ignoring event: ", message
       continue
 
     case message:
     of "close": break
     else:
       try:
-        let event = json2schema message
+        let event = (Event)(json2schema message)
+
+        # echo "turn of the message vs current turn: ", event.turnNumber, " vs ", bot.turnNumber, ": ", event.`type`
+
+        if event.turnNumber != 0 and abs(event.turnNumber - bot.getTurnNumber) > 2:
+          echo "event rejected: ", event.`type`
+          continue
+
         case event.`type`:
         of botHitWallEvent:
           bot.setDistanceRemaining(0) # zero the distance remaining
@@ -89,14 +96,18 @@ proc methodWorker(bot: Bot)  {.thread.} =
           bot.onBulletFired((BulletFiredEvent)event) # activating the bot method
         of bulletHitBotEvent:
           let bulletHitBotEvent = (BulletHitBotEvent)event # cast the event to the right type
-          # creating the HitByBulletEvent from the BulletHitBotEvent
-          let hitByBulletEvent = HitByBulletEvent(
-            `type`: Type.hitByBulletEvent,
-            bullet: bulletHitBotEvent.bullet,
-            damage: bulletHitBotEvent.damage,
-            energy: bulletHitBotEvent.energy
-          )
-          bot.onHitByBullet(hitByBulletEvent) # activating the bot method
+          echo "id victim: ", bulletHitBotEvent.victimId, " my id: ", bot.myId
+          if bulletHitBotEvent.victimId == bot.myId: # check if my bot is the victim
+            # creating the HitByBulletEvent from the BulletHitBotEvent
+            let hitByBulletEvent = HitByBulletEvent(
+              `type`: Type.hitByBulletEvent,
+              bullet: bulletHitBotEvent.bullet,
+              damage: bulletHitBotEvent.damage,
+              energy: bulletHitBotEvent.energy
+            )
+            bot.onHitByBullet(hitByBulletEvent) # activating the bot method
+          else: # the bot hit someone else
+            bot.onBulletHit(bulletHitBotEvent) # activating the bot method       
         of bulletHitBulletEvent:
           bot.onBulletHitBullet((BulletHitBulletEvent)event) # activating the bot method
         of bulletHitWallEvent:
@@ -197,9 +208,7 @@ proc handleMessage(bot: Bot, json_message: string) =
 
     if bot.first_tick:
       # init with the first tick data
-      bot.botState = tick_event_for_bot.botState
-      bot.turnNumber = tick_event_for_bot.turnNumber
-      bot.roundNumber = tick_event_for_bot.roundNumber
+      bot.tick = tick_event_for_bot
 
       # notify the botWorker to run
       botWorkerChan.send("run")
@@ -211,24 +220,28 @@ proc handleMessage(bot: Bot, json_message: string) =
 
       bot.first_tick = false
     else:
-      turn_done = tick_event_for_bot.botState.direction -
-          bot.botState.direction
+      turn_done = tick_event_for_bot.botState.direction - bot.tick.botState.direction
       turn_done = (turn_done + 540) mod 360 - 180
 
-      gunTurn_done = tick_event_for_bot.botState.gunDirection -
-          bot.botState.gunDirection
+      gunTurn_done = tick_event_for_bot.botState.gunDirection - bot.tick.botState.gunDirection
       gunTurn_done = (gunTurn_done + 540) mod 360 - 180
 
-      radarTurn_done = tick_event_for_bot.botState.radarDirection -
-          bot.botState.radarDirection
+      radarTurn_done = tick_event_for_bot.botState.radarDirection - bot.tick.botState.radarDirection
       radarTurn_done = (radarTurn_done + 540) mod 360 - 180
+
+      # adjust the gun turn by the body turn if the gun is not independent from the body
+      if not bot.isAdjustGunForBodyTurn: gunTurn_done -= turn_done
+
+      # adjust the radar turn by the body turn if the radar is not independent from the body
+      if not bot.isAdjustRadarForGunTurn: radarTurn_done -= turn_done
+
+      # adjust the radar turn by the gun turn if the radar is not independent from the gun
+      if not bot.isAdjustRadarForGunTurn: radarTurn_done -= gunTurn_done
 
       distance_done = tick_event_for_bot.botState.speed
 
       # replace old data with new data
-      bot.botState = tick_event_for_bot.botState
-      bot.turnNumber = tick_event_for_bot.turnNumber
-      bot.roundNumber = tick_event_for_bot.roundNumber
+      bot.tick = tick_event_for_bot
 
       eventsHandlerChan.send(json_message)
 
@@ -250,14 +263,14 @@ proc conectionHandler(bot: Bot) {.async.} =
     webSocket = await newWebSocket(bot.serverConnectionURL)
 
     # signal the threads that the connection is ready
-    setConnected(true)
+    bot.setConnected(true)
 
     proc writer() {.async.} =
       ## Loops while socket is open, looking for messages to write
       while webSocket.readyState == Open:
 
         # continuoslly check if intent must be sent
-        if sendIntent.load() and bot.turnNumber != lastIntentTurn:
+        if sendIntent.load() and bot.getTurnNumber != lastIntentTurn:
           # update the reaminings
           bot.updateRemainings()
 
@@ -269,7 +282,7 @@ proc conectionHandler(bot: Bot) {.async.} =
           bot.resetIntent()
           
           # update the last turn we sent the intent
-          lastIntentTurn = bot.turnNumber
+          lastIntentTurn = bot.getTurnNumber
 
           # stdout.write("-")
           # stdout.flushFile()

@@ -23,7 +23,6 @@ public class JavaTester extends Bot {
     @Override
     public void onHitByBullet(HitByBulletEvent event) {
         System.out.println("Ouch, I got hit by a bullet!");
-        direction = -direction;
-        turnRight(Double.MAX_VALUE * direction);
+        turnRadarRight(360);
     }
 }

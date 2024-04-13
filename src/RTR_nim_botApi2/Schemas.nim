@@ -45,7 +45,7 @@ type
     x*,y*,angle*: float #The x,y and angle coordinate. When it is not set, a random value will be used
 
   Event* = ref object of Schema
-    turnNumber*: int #The turn number in current round when event occurred
+    turnNumber*: int = 0 #The turn number in current round when event occurred, default is 0 = out of the game
 
   BotAddress* = ref object of RootObj
     host*: string #Host name or IP address
@@ -209,21 +209,21 @@ type
     isReadyTimeoutLocked*: bool #Flag specifying if the ready timeout is fixed for this game type
     defaultTurnsPerSecond*: int #Default number of turns to show per second for an observer/UI
 
-  GameAbortedEvent* = ref object of Schema
+  GameAbortedEvent* = ref object of Event
 
-  GameEndedEventForBot* = ref object of Schema
+  GameEndedEventForBot* = ref object of Event
     numberOfRounds*: int #Number of rounds played
     results*: BotResultsForObserver #Results of the battle for all bots
 
-  GameEndedEventForObserver* = ref object of Schema
+  GameEndedEventForObserver* = ref object of Event
     numberOfRounds*: int #Number of rounds played
     results*: seq[BotResultsForObserver] #Results of the battle for all bots
 
-  GameStartedEventForBot* = ref object of Schema
+  GameStartedEventForBot* = ref object of Event
     myId*: int #My ID is an unique identifier for this bot
     gameSetup*: GameSetup #Game setup
 
-  GameStartedEventForObserver* = ref object of Schema
+  GameStartedEventForObserver* = ref object of Event
     gameSetup*: GameSetup #Game setup
     participants*:seq[Participant]
 
@@ -246,17 +246,15 @@ type
     programmingLang*: string #Programming language the bot is written in, e.g. "Java", "C#" or "C++"
     initialPosition*: InitialPosition #Initial position of the bot
 
-  RoundStartedEvent* = ref object of Schema
+  RoundStartedEvent* = ref object of Event
     roundNumber*: int #The current round number in the battle when event occurred
 
-  RoundEndedEventForBot* = ref object of Schema
+  RoundEndedEventForBot* = ref object of Event
     roundNumber*: int #The current round number in the battle when event occurred
-    turnNumber*: int #The current turn number in the round when event occurred
     results*: BotResultsForBot #The accumulated bot results by the end of the round.
 
-  RoundEndedEventForObserver* = ref object of Schema
+  RoundEndedEventForObserver* = ref object of Event
     roundNumber*: int #The current round number in the battle when event occurred
-    turnNumber*: int #The current turn number in the round when event occurred
     results*: seq[BotResultsForObserver] #The accumulated bot results by the end of the round.
 
   ScannedBotEvent* = ref object of Event

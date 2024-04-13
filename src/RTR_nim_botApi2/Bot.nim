@@ -25,9 +25,7 @@ type
     initialPosition*: InitialPosition
     gameSetup*: GameSetup
     myId*: int
-    turnNumber*: int
-    roundNumber*: int
-    botState*: BotState
+    tick*: TickEventForBot
     intent*: BotIntent = BotIntent(`type`: Type.botIntent)
     first_tick*: bool = true # used to detect if the bot have been stated at first tick
 
@@ -44,8 +42,7 @@ proc newBot*(json_file: string): Bot =
     # build the bot from the json
     let path: string = joinPath(getAppDir(), json_file)
     let content: string = readFile(path)
-    let bot: Bot = fromJson(content, Bot)
-    # maybe code here ...
+    var bot = fromJson(content, Bot)
     return bot
   except IOError:
     quit(1)
@@ -53,8 +50,8 @@ proc newBot*(json_file: string): Bot =
 # the following section contains all the methods that are supposed to be overrided by the bot creator
 method run*(bot: BluePrint) {.base gcsafe.} = discard
 method onBulletFired*(bot: BluePrint, bulletFiredEvent: BulletFiredEvent) {.base gcsafe.} = discard
-method onBulletHitBullet*(bot: BluePrint,
-    bulletHitBulletEvent: BulletHitBulletEvent) {.base gcsafe.} = discard
+method onBulletHit*(bot: BluePrint,bulletHitBotEvent: BulletHitBotEvent) {.base gcsafe.} = discard
+method onBulletHitBullet*(bot: BluePrint,bulletHitBulletEvent: BulletHitBulletEvent) {.base gcsafe.} = discard
 method onBulletHitWall*(bot: BluePrint, bulletHitWallEvent: BulletHitWallEvent) {.base gcsafe.} = discard
 method onGameAborted*(bot: BluePrint, gameAbortedEvent: GameAbortedEvent) {.base gcsafe.} = discard
 method onGameEnded*(bot: BluePrint, gameEndedEventForBot: GameEndedEventForBot) {.base gcsafe.} = discard
@@ -83,9 +80,6 @@ var eventsHandlerChan*: Channel[string]
 
 # connection
 var connected: bool = false
-
-# actions lock
-var locked: Atomic[bool]
 
 #++++++++ GAME PHYSICS ++++++++#
 # bots accelerate at the rate of 1 unit per turn but decelerate at the rate of 2 units per turn
@@ -121,8 +115,19 @@ var gunTurn_done*: float = 0
 var radarTurn_done*: float = 0
 var distance_done*: float = 0
 
-proc console_log*(bot: Bot, msg: string) =
-  bot.intent.stdOut.add(msg & "\r\n")
+proc log*(bot: Bot, items: varargs[string, `$`]) =
+  var message:string = ""
+  for x in items:
+    message = message & x
+  echo "[LOG] ", message
+  bot.intent.stdOut.add(message & "\r\n")
+
+proc error*(bot: Bot, items: varargs[string, `$`]) =
+  var message:string = ""
+  for x in items:
+    message = message & x
+  echo "[ERROR] ", message
+  bot.intent.stdErr.add(message & "\r\n")
 
 proc resetIntent*(bot: Bot) =
   bot.intent.rescan = false
@@ -190,7 +195,6 @@ proc start*(bot: Bot) =
   bot.intent = BotIntent(`type`: Type.botIntent)
   
   bot.running.store(true)
-  locked.store(false)
   sendIntent.store(false)
   bot.first_tick = true
 
@@ -220,19 +224,25 @@ proc isRammed*(event: BotHitBotEvent): bool =
 #++++++++ BOT HEALTH ++++++++#
 proc getEnergy*(bot: Bot): float =
   ## returns the current energy of the bot
-  if bot.botState == nil:
+  if bot.tick.botState == nil:
     return 100
   else:
-    return bot.botState.energy
+    return bot.tick.botState.energy
 
 #++++++++ CONNECTION ++++++++#
 proc isConnected*(): bool =
   ## returns true if the bot is connected to the server
   return connected
 
-proc setConnected*(isConnected: bool) =
+proc setConnected*(bot:Bot, isConnected: bool) =
   ## set the connection status
   connected = isConnected
+  bot.log("connected: ", isConnected)
+
+#+++++++++ GAME DATA ++++++++++#
+proc getEnemyCount*(bot: Bot): int =
+  ## returns the number of enemies in the game
+  return bot.tick.enemyCount
 
 #++++++++ BOT SETUP +++++++++#
 proc setAdjustGunForBodyTurn*(bot: Bot, adjust: bool) =
@@ -355,19 +365,19 @@ proc getArenaWidth*(bot: Bot): int =
 #++++++++ GAME AND BOT STATUS +++++++++#
 proc getRoundNumber*(bot: Bot): int =
   ## returns the current round number
-  return bot.roundNumber
+  return bot.tick.roundNumber
 
 proc getTurnNumber*(bot: Bot): int =
   ## returns the current turn number
-  return bot.turnNumber
+  return bot.tick.turnNumber
 
 proc getX*(bot: Bot): float =
   ## returns the bot's X position
-  return bot.botState.x
+  return bot.tick.botState.x
 
 proc getY*(bot: Bot): float =
   ## returns the bot's Y position
-  return bot.botState.y
+  return bot.tick.botState.y
 
 #++++++++ TURNING RADAR +++++++++#
 proc getRadarTurnRemaining*(bot: Bot): float =
@@ -376,7 +386,7 @@ proc getRadarTurnRemaining*(bot: Bot): float =
 
 proc getRadarDirection*(bot: Bot): float =
   ## returns the current radar direction in degrees
-  return bot.botState.radarDirection
+  return bot.tick.botState.radarDirection
 
 proc getMaxRadarTurnRate*(bot: Bot): float =
   ## returns the maximum turn rate of the radar in degrees
@@ -405,21 +415,13 @@ proc radarTurnLeft*(bot: Bot, degrees: float) =
   ##
   ## **BLOCKING CALL**
   
-  # if bot is locked the bot can't do other actions
-  if locked.load(): return
-
-  # else we lock it
-  locked.store(true)
-
   # ask to radarTurn left for all degrees, the server will take care of radarTurning the bot the max amount of degrees allowed
   bot.setRadarTurnLeft(degrees)
 
   # go until the bot is not running or the remaining_radarTurnRate is 0
   while bot.isRunning and bot.getRadarTurnRemaining != 0:
+    echo "waiting for radar turn to finish... ", bot.getRadarTurnRemaining
     go bot
-
-  # unlock the bot
-  locked.store(false)
 
 proc radarTurnRight*(bot: Bot, degrees: float) =
   ## turn the radar right by `degrees` if the bot is not locked doing another blocking call
@@ -446,44 +448,35 @@ proc setGunTurnRate*(bot: Bot, degrees: float) =
   ## **OVERRIDES CURRENT VALUE**
   bot.intent.gunTurnRate = degrees
 
-proc setGunTurnLeft*(bot: Bot, degrees: float) =
+proc setTurnGunLeft*(bot: Bot, degrees: float) =
   ## set the gun to turn left by `degrees` if the bot is not locked doing a blocking call
   ##
   ## **OVERRIDES CURRENT VALUE**
   remaining_gunTurn = degrees
 
-proc setGunTurnRight*(bot: Bot, degrees: float) =
+proc setTurnGunRight*(bot: Bot, degrees: float) =
   ## set the gun to turn right by `degrees` if the bot is not locked doing a blocking call
   ##
   ## **OVERRIDES CURRENT VALUE**
-  bot.setGunTurnLeft(-degrees)
+  bot.setTurnGunLeft(-degrees)
 
-proc gunTurnLeft*(bot: Bot, degrees: float) =
+proc turnGunLeft*(bot: Bot, degrees: float) =
   ## turn the gun left by `degrees` if the bot is not locked doing another blocking call
   ##
   ## **BLOCKING CALL**
-  
-  # if bot is locked the bot can't do other actions
-  if locked.load(): return
-
-  # else we lock it
-  locked.store(true)
 
   # ask to gunTurn left for all degrees, the server will take care of gunTurning the bot the max amount of degrees allowed
-  bot.setGunTurnLeft(degrees)
+  bot.setTurnGunLeft(degrees)
 
   # go until the bot is not running or the remaining_gunTurnRate is 0
   while bot.isRunning and remaining_gunTurn != 0:
     go bot
 
-  # unlock the bot
-  locked.store(false)
-
-proc gunTurnRight*(bot: Bot, degrees: float) =
+proc turnGunRight*(bot: Bot, degrees: float) =
   ## turn the gun right by `degrees` if the bot is not locked doing another blocking call
   ##
   ## **BLOCKING CALL**
-  bot.gunTurnLeft(-degrees)
+  bot.turnGunLeft(-degrees)
 
 proc getGunTurnRemaining*(bot: Bot): float =
   ## returns the remaining gun turn rate in degrees
@@ -491,14 +484,14 @@ proc getGunTurnRemaining*(bot: Bot): float =
 
 proc getGunDirection*(bot: Bot): float =
   ## returns the current gun direction in degrees
-  return bot.botState.gunDirection
+  return bot.tick.botState.gunDirection
 
 proc getMaxGunTurnRate*(bot: Bot): float =
   return MAX_GUN_TURN_RATE
 
 proc getGunHeat*(bot: Bot): float =
   ## returns the current gun heat
-  return bot.botState.gunHeat
+  return bot.tick.botState.gunHeat
 
 #++++++++ TURNING BODY +++++++#
 ## TODO: maybe this needs some rethink
@@ -525,12 +518,6 @@ proc turnLeft*(bot: Bot, degrees: float) =
   ##
   ## **BLOCKING CALL**
   
-  # if bot is locked the bot can't do other actions
-  if locked.load(): return
-
-  # else we lock it
-  locked.store(true)
-
   # ask to turn left for all degrees, the server will take care of turning the bot the max amount of degrees allowed
   bot.setTurnLeft(degrees)
 
@@ -539,7 +526,7 @@ proc turnLeft*(bot: Bot, degrees: float) =
     bot.go()
 
   # unlock the bot
-  locked.store(false)
+  # locked.store(false)
 
 proc turnRight*(bot: Bot, degrees: float) =
   ## turn the body right by `degrees` if the bot is not locked doing another blocking call
@@ -553,7 +540,7 @@ proc getTurnRemaining*(bot: Bot): float =
 
 proc getDirection*(bot: Bot): float =
   ## returns the current body direction in degrees
-  return bot.botState.direction
+  return bot.tick.botState.direction
 
 proc getMaxTurnRate*(bot: Bot): float =
   ## returns the maximum turn rate of the body in degrees
@@ -612,12 +599,6 @@ proc forward*(bot: Bot, distance: float) =
   ## `distance` is in pixels
   ##
   ## **BLOCKING CALL**
-  
-  # if bot is locked the bot can't do other actions
-  if locked.load(): return
-
-  # else we lock it
-  locked.store(true)
 
   # ask to move forward for all pixels (distance), the server will take care of moving the bot the max amount of pixels allowed
   bot.setForward(distance)
@@ -625,9 +606,6 @@ proc forward*(bot: Bot, distance: float) =
   # go until the bot is not running or the remaining_turnRate is 0
   while bot.isRunning and remaining_distance != 0:
     go bot
-
-  # unlock the bot
-  locked.store(false)
 
 proc back*(bot: Bot, distance: float) =
   ## move the bot back by `distance` if the bot is not locked doing another blocking call
@@ -664,7 +642,7 @@ proc setFire*(bot: Bot, firepower: float): bool =
   ## If the `gun heat` is not 0 or if the `energy` is less than `firepower` the intent of firing will not be added
 
   # clamp the value
-  if bot.botState.energy < firepower or bot.botState.gunHeat > 0:
+  if bot.tick.botState.energy < firepower or bot.tick.botState.gunHeat > 0:
     return false # cannot fire yet
   else:
     bot.intent.firePower = firepower
@@ -703,6 +681,13 @@ proc waitFor*(bot: Bot, condition: Condition) {.gcsafe.} =
       go bot
   
 #++++++++++++++ UTILS ++++++++++++++#
+proc distanceTo*(bot: Bot, x, y: float): float =
+  ## returns the distance from the bot's coordinates to the point (x,y)
+  ##
+  ## `x` and `y` are the coordinates of the point
+  ## `return` is the distance to the point x,y
+  return hypot(x-bot.tick.botState.x, y-bot.tick.botState.y)
+
 proc normalizeAbsoluteAngle*(angle: float): float =
   ## normalize the angle to an absolute angle into the range [0,360]
   ##
@@ -732,8 +717,7 @@ proc directionTo*(bot: Bot, x, y: float): float =
   ##
   ## `x` and `y` are the coordinates of the point
   ## `return` is the direction to the point x,y in degrees in the range [0,360]
-  result = normalizeAbsoluteAngle(radToDeg(arctan2(y-bot.botState.y,
-      x-bot.botState.x)))
+  result = normalizeAbsoluteAngle(radToDeg(arctan2(y-bot.tick.botState.y, x-bot.tick.botState.x)))
 
 proc bearingTo*(bot: Bot, x, y: float): float =
   ## returns the bearing to the point (x,y) in degrees
@@ -741,4 +725,4 @@ proc bearingTo*(bot: Bot, x, y: float): float =
   ## `x` and `y` are the coordinates of the point
   ## `return` is the bearing to the point x,y in degrees in the range [-180,180]
   result = normalizeRelativeAngle(bot.directionTo(x, y) -
-      bot.botState.direction)
+      bot.tick.botState.direction)

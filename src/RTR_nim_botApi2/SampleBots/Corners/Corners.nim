@@ -76,7 +76,7 @@ method run(bot:Bot) {.gcsafe.} =
     gunIncrement *= -1
 
 method onScannedBot(bot: Bot, e:ScannedBotEvent) =
-  bot.console_log("Scanned bot " & $e.scannedBotId)
+  bot.log "Scanned bot ", e.scannedBotId
   var distance = bot.distanceTo(e.x, e.y)
 
   # Should we stop, or just fire?
