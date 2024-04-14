@@ -119,6 +119,7 @@ proc log*(bot: Bot, items: varargs[string, `$`]) =
   var message:string = ""
   for x in items:
     message = message & x
+  
   echo "[LOG] ", message
   bot.intent.stdOut.add(message & "\r\n")
 
@@ -199,7 +200,13 @@ proc start*(bot: Bot) =
   bot.first_tick = true
 
 proc go*(bot: Bot) =
-  if sendIntent.load() or not bot.isRunning(): return # if the bot is already sending an intent, return
+  if not bot.isRunning(): # if the bot is not running, return
+    return
+
+  if sendIntent.load(): # if the bot is already sending an intent, wait next turn and return
+    discard nextTurn.recv()
+    return
+
   # send the intent
   sendIntent.store(true)
 
@@ -420,7 +427,6 @@ proc radarTurnLeft*(bot: Bot, degrees: float) =
 
   # go until the bot is not running or the remaining_radarTurnRate is 0
   while bot.isRunning and bot.getRadarTurnRemaining != 0:
-    echo "waiting for radar turn to finish... ", bot.getRadarTurnRemaining
     go bot
 
 proc radarTurnRight*(bot: Bot, degrees: float) =
@@ -440,6 +446,7 @@ proc rescan*(bot: Bot) =
 
   # ask to rescan
   bot.setRescan()
+  go bot
 
 #++++++++ TURNING GUN +++++++++#
 proc setGunTurnRate*(bot: Bot, degrees: float) =

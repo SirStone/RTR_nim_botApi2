@@ -31,7 +31,7 @@ method run(bot:Bot) =
   
   # Turn the gun to turn right 90 degrees.
   peek = true
-  bot.gunTurnRight(90)
+  bot.turnGunRight(90)
   bot.turnRight(90)
 
   # Main loop
@@ -55,7 +55,8 @@ method onHitBot(bot:Bot, bot_hit_bot_event:BotHitBotEvent) =
     bot.forward(100)
 
 # We scanned another bot -> fire!
-method onScannedBot(bot:Bot, scanned_bot_event:ScannedBotEvent) = 
+method onScannedBot(bot:Bot, scanned_bot_event:ScannedBotEvent) =
+  bot.log "Walls scanned a bot at turn ", scanned_bot_event.turnNumber, " and peek is ", peek
   bot.fire(2)
   # Note that scan is called automatically when the bot is turning.
   # By calling it manually here, we make sure we generate another scan event if there's a bot

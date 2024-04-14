@@ -33,7 +33,7 @@ method onCustomCondition(bot:Bot, name:string) =
     trigger -= 20
 
     # Print out energy level
-    bot.console_log("Ouch, down to " & $(bot.getEnergy() + 0.5) & " energy.")
+    bot.log "Ouch, down to ", (bot.getEnergy() + 0.5), " energy."
 
     # Move around a bit
     bot.turnLeft(65);

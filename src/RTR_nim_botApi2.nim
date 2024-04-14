@@ -83,10 +83,6 @@ proc methodWorker(bot: Bot)  {.thread.} =
 
         # echo "turn of the message vs current turn: ", event.turnNumber, " vs ", bot.turnNumber, ": ", event.`type`
 
-        if event.turnNumber != 0 and abs(event.turnNumber - bot.getTurnNumber) > 2:
-          echo "event rejected: ", event.`type`
-          continue
-
         case event.`type`:
         of botHitWallEvent:
           bot.setDistanceRemaining(0) # zero the distance remaining
@@ -96,7 +92,6 @@ proc methodWorker(bot: Bot)  {.thread.} =
           bot.onBulletFired((BulletFiredEvent)event) # activating the bot method
         of bulletHitBotEvent:
           let bulletHitBotEvent = (BulletHitBotEvent)event # cast the event to the right type
-          echo "id victim: ", bulletHitBotEvent.victimId, " my id: ", bot.myId
           if bulletHitBotEvent.victimId == bot.myId: # check if my bot is the victim
             # creating the HitByBulletEvent from the BulletHitBotEvent
             let hitByBulletEvent = HitByBulletEvent(
@@ -138,6 +133,10 @@ proc methodWorker(bot: Bot)  {.thread.} =
           echo "[", bot.name, ".methodWorker] event: not handled ", event.`type`, " in thread ", id
       except jsony.JsonError:
         bot.onCustomCondition(message) # activating the bot method
+
+proc clearEventsQueue() =
+  ## clear the events queue
+  while eventsHandlerChan.tryRecv()[0]: discard
       
 proc handleMessage(bot: Bot, json_message: string) =
   # Convert the json to a Message object
@@ -243,12 +242,17 @@ proc handleMessage(bot: Bot, json_message: string) =
       # replace old data with new data
       bot.tick = tick_event_for_bot
 
+      clearEventsQueue()
+
+      # close and repoen the channel to clear the events
+      bot.log "aggiungo evento tick"
       eventsHandlerChan.send(json_message)
 
       notifyNextTurn()
     
     # for every event inside this tick call the relative event for the bot
     for event in tick_event_for_bot.events:
+      bot.log "aggiungo evento ", ((Event)(json2schema $event)).`type`
       eventsHandlerChan.send($event) # send the event to the method worker threads
 
     # start a thread for every condition check
@@ -256,9 +260,11 @@ proc handleMessage(bot: Bot, json_message: string) =
       if condition.test(bot):
         eventsHandlerChan.send(condition.name)
 
-  else: eventsHandlerChan.send(json_message)
+  else:
+    bot.log "aggiungo evento ", message.`type`
+    eventsHandlerChan.send(json_message)
 
-proc conectionHandler(bot: Bot) {.async.} =
+proc connectionHandler(bot: Bot) {.async.} =
   try:
     webSocket = await newWebSocket(bot.serverConnectionURL)
 
@@ -275,6 +281,8 @@ proc conectionHandler(bot: Bot) {.async.} =
           bot.updateRemainings()
 
           let json_intent = bot.intent.toJson
+
+          # echo "[",bot.getTurnNumber,"]",json_intent
 
           await webSocket.send(json_intent)
 
@@ -350,7 +358,7 @@ proc startBot*(bot: Bot, connect: bool = true,
       createThread methodWorkerThreads[i], methodWorker, bot
 
     # start the connection handler and wait for it undefinitely
-    waitFor conectionHandler(bot)
+    waitFor connectionHandler(bot)
 
     # send closing signal to the bot thread
     botWorkerChan.send("close")

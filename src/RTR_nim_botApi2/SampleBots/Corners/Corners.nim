@@ -104,6 +104,6 @@ method onDeath(bot: Bot, e:BotDeathEvent) =
     corner += 90 # Next corner
     corner = corner mod 360 # Make sure it's in the 0-359 range
     
-    bot.console_log("I died and did poorly... switching corner to " & $corner)
+    bot.log "I died and did poorly... switching corner to ", corner
   else:
-    bot.console_log("I died but did well. I will still use corner " & $corner)
+    bot.log "I died but did well. I will still use corner ", corner
