@@ -4,3 +4,4 @@ bin
 vgcore.*
 callgrind.*
 .vscode
+.kdev4
