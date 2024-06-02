@@ -1,7 +1,7 @@
 import streams
 
 # Package
-version       = "0.21.1"
+version       = "0.21.2"
 author        = "SirStone"
 description   = "Version2 of this library, for nim2.0"
 license       = "GPL-3.0-only"
@@ -12,10 +12,10 @@ binDir        = "bin"
 requires "nim >= 2.0.0"
 requires "jsony >= 0.1.0"
 requires "ws >= 0.5.0"
-requires "trick¨ >= 0.1.7"
+requires "trick >= 0.1.7"
 
 # Robocode Tank Royale Version/Tag
-let RTR_Version = "v0.22.2"
+let RTR_Version = "v0.23.2"
 
 # Robocode Tank Royale github repo
 let RTR_repo = "robocode-dev/tank-royale"
@@ -25,6 +25,15 @@ let RTR_git = "https://github.com/" & RTR_repo & ".git"
 
 # Robocode Tank Royale API repos
 let RTR_api_repos = "https://api.github.com/repos/" & RTR_repo
+
+# Asset folder
+let asset_folder = "assets/schemas"
+
+# Schemas.nim folder
+let schemas_nim = "src/RTR_nim_botApi2"
+
+# assets2nim bin
+let assets2nim_bin_folder = "bin/assets_tools"
 
 # Tasks
 task asset_tankRoyale, "checks and downloads the asset tank-royale":
@@ -37,7 +46,8 @@ task asset_tankRoyale, "checks and downloads the asset tank-royale":
     exec "git clone " & RTR_git & " " & RTR_git_folder
 
     # Switching the repo to the RTR_Version tag
-    exec "cd " & RTR_git_folder & " && git checkout tags/" & RTR_Version
+    let (outStr, errCode) = gorgeEx "cd " & RTR_git_folder & " && git checkout tags/" & RTR_Version
+    # echo outStr # uncomeent for debugging
   else:
     echo("Robocode Tank Royale git repo already cloned")
 
@@ -53,16 +63,14 @@ task asset_tankRoyale, "checks and downloads the asset tank-royale":
         echo("Switching the repo to the RTR_Version tag")
 
         # Switching the repo to the RTR_Version tag
-        exec "cd " & RTR_git_folder & " && git checkout tags/" & RTR_Version
+        let (outStr, errCode) = gorgeEx "cd " & RTR_git_folder & " && git fetch && git checkout tags/" & RTR_Version
+        # echo outStr # uncomeent for debugging
     else:
       echo("Error code: ", errCode)
 
 task asset_schemas, "checks and downloads the asset schemas":
   echo("Robocode Tank Royale Version: ",RTR_Version)
 
-  # Check if the Robocode Tank Royale schemas version is present in the 'assets' folder
-  let asset_folder = "assets/schemas"
-  
   # Make sure that the asset folder exists
   if not fileExists(asset_folder):
     exec "mkdir -p " & asset_folder
@@ -71,6 +79,13 @@ task asset_schemas, "checks and downloads the asset schemas":
     # echo "curl " & RTR_api_repos & "/contents/schema/schemas " & "| grep download_url | cut -d'\"' -f4 >> " & download_list
     exec "curl " & RTR_api_repos & "/contents/schema/schemas " & "| grep download_url | cut -d'\"' -f4 | xargs wget -q -nH --cut-dirs=4 --directory-prefix=" & asset_folder
 
+task build_schemas, "builds the Schemas.nim file from yaml assets":
+  # Make sure that the asset_tools folder exists
+  if not fileExists(assets2nim_bin_folder):
+    exec "mkdir -p " & assets2nim_bin_folder
+
+  # Compile the schemas2nim.nim file inside the bin folder
+  exec "nim c --run -d:release --deepcopy:on --outdir:" & assets2nim_bin_folder & "/schemas2nim src/RTR_nim_botApi2/assets_tools/schemas2nim.nim " & asset_folder & " " & schemas_nim
 # before build we need...
 # before build:
   # ...to check and download the asset tank-royale
