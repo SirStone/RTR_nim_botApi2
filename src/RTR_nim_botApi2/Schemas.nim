@@ -1,5 +1,5 @@
 # This file is generated automatically by the 'schemas2nim' script
-# Generated on: 2024-06-01T15:11:01Z (Italy)
+# Generated on: 2024-07-14T10:58:07Z (Italy time)
 import jsony, json
 
 type
@@ -9,7 +9,6 @@ type
     event = "Event"
     botDeathEvent = "BotDeathEvent"
     botHandshake = "BotHandshake"
-    hitBotEvent = "HitBotEvent"
     botHitWallEvent = "BotHitWallEvent"
     botInfo = "BotInfo"
     botIntent = "BotIntent"
@@ -18,27 +17,22 @@ type
     botStateWithId = "BotStateWithId"
     botState = "BotState"
     bulletFiredEvent = "BulletFiredEvent"
-    bulletHitBot = "BulletHitBot"
     bulletHitBulletEvent = "BulletHitBulletEvent"
     bulletHitWallEvent = "BulletHitWallEvent"
     bulletState = "BulletState"
     changeTps = "ChangeTps"
-    color = "Color"
     controllerHandshake = "ControllerHandshake"
     gameAbortedEvent = "GameAbortedEvent"
     gameEndedEventForBot = "GameEndedEventForBot"
     gameEndedEventForObserver = "GameEndedEventForObserver"
     gamePausedEventForObserver = "GamePausedEventForObserver"
     gameResumedEventForObserver = "GameResumedEventForObserver"
-    gameSetup = "GameSetup"
-    gameStartedEventForBot = "GameStartedEventForBot"
     gameStartedEventForObserver = "GameStartedEventForObserver"
     initialPosition = "InitialPosition"
     nextTurn = "NextTurn"
     observerHandshake = "ObserverHandshake"
     participant = "Participant"
     pauseGame = "PauseGame"
-    resultsForBot = "ResultsForBot"
     resultsForObserver = "ResultsForObserver"
     resumeGame = "ResumeGame"
     roundEndedEventForBot = "RoundEndedEventForBot"
@@ -55,6 +49,12 @@ type
     tickEventForObserver = "TickEventForObserver"
     tpsChangedEvent = "TpsChangedEvent"
     wonRoundEvent = "WonRoundEvent"
+    gameSetup = "GameSetup"
+    gameStartedEventForBot = "GameStartedEventForBot"
+    botHitBotEvent = "BotHitBotEvent"
+    bulletHitBotEvent = "BulletHitBotEvent"
+    resultsForBot = "ResultsForBot"
+    hitByBulletEvent = "HitByBulletEvent"
 
   Message* = ref object of RootObj
     ## Abstract message exchanged between server and client
@@ -92,15 +92,6 @@ type
     isDroid*:bool # Flag specifying if the bot is a Droid (team bot with 120 energy, but no scanner)
     secret*:string # Secret used for access control with the server
 
-  HitBotEvent* = ref object of Event
-    ## Event occurring when a bot has collided with another bot
-    victimId*:int # id of the victim bot that got hit
-    botId*:int # id of the bot that hit another bot
-    energy*:float # Remaining energy level of the victim bot
-    x*:float # X coordinate of victim bot
-    y*:float # Y coordinate of victim bot
-    rammed*:bool # Flag specifying, if the victim bot got rammed
-
   BotHitWallEvent* = ref object of Event
     ## Event occurring when a bot has hit a wall
     victimId*:int # id of the victim bot that hit the wall
@@ -124,13 +115,13 @@ type
     adjustRadarForGunTurn*:bool # Flag indicating if the radar must be adjusted to compensate for the gun turn. Default is false.
     rescan*:bool # Flag indicating if the bot should rescan with previous radar direction and scan sweep angle.
     fireAssist*:bool # Flag indication if fire assistance is enabled.
-    bodyColor*:Color # New color of the body
-    turretColor*:Color # New color of the cannon turret
-    radarColor*:Color # New color of the radar
-    bulletColor*:Color # New color of the bullet. Note. This will be the color of a bullet when it is fired
-    scanColor*:Color # New color of the scan arc
-    tracksColor*:Color # New color of the tracks
-    gunColor*:Color # New color of the gun
+    bodyColor*:string # New color of the body
+    turretColor*:string # New color of the cannon turret
+    radarColor*:string # New color of the radar
+    bulletColor*:string # New color of the bullet. Note. This will be the color of a bullet when it is fired
+    scanColor*:string # New color of the scan arc
+    tracksColor*:string # New color of the tracks
+    gunColor*:string # New color of the gun
     stdOut*:string # New text received from standard output (stdout)
     stdErr*:string # New text received from standard error (stderr)
     teamMessages*:seq[TeamMessage] # Messages to send to one or more individual teammates or broadcast to the entire team
@@ -164,24 +155,17 @@ type
     gunTurnRate*:float # Turn rate of the gun in degrees per turn (can be positive and negative)
     radarTurnRate*:float # Turn rate of the radar in degrees per turn (can be positive and negative)
     gunHeat*:float # Gun heat
-    bodyColor*:Color # Current RGB color of the body, if changed
-    turretColor*:Color # New color of the gun turret, if changed
-    radarColor*:Color # New color of the radar, if changed
-    bulletColor*:Color # New color of the bullets, if changed.
-    scanColor*:Color # New color of the scan arc, if changed
-    tracksColor*:Color # New color of the tracks, if changed
-    gunColor*:Color # New color of gun, if changed
+    bodyColor*:string # Current RGB color of the body, if changed
+    turretColor*:string # New color of the gun turret, if changed
+    radarColor*:string # New color of the radar, if changed
+    bulletColor*:string # New color of the bullets, if changed.
+    scanColor*:string # New color of the scan arc, if changed
+    tracksColor*:string # New color of the tracks, if changed
+    gunColor*:string # New color of gun, if changed
 
   BulletFiredEvent* = ref object of Event
     ## Event occurring when a bullet has been fired from a bot
     bullet*:BulletState # Bullet that was fired
-
-  BulletHitBot* = ref object of Event
-    ## Event occurring when a bot has been hit by a bullet from another bot
-    victimId*:int # id of the bot that got hit
-    bullet*:BulletState # Bullet that hit the bot
-    damage*:float # Damage inflicted by the bullet
-    energy*:float # Remaining energy level of the bot that got hit
 
   BulletHitBulletEvent* = ref object of Event
     ## Event occurring when a bullet has hit another bullet
@@ -200,25 +184,11 @@ type
     x*:float # X coordinate
     y*:float # Y coordinate
     direction*:float # Direction in degrees
-    color*:Color # Color of the bullet
+    color*:string # Color of the bullet
 
   ChangeTps* = ref object of Message
     ## Command to change the TPS (Turns Per Second), which is the number of turns displayed for an observer. TPS is similar to FPS, where a frame is equal to a turn.
     tps*:int # Turns per second (TPS). Typically a value from 0 to 999. -1 means maximum possible TPS speed.
-
-  Color* = ref object of RootObj
-    ## Represents a color using hexadecimal format for web colors. Note that colors must have a leading number sign (#).
-    ## See https://en.wikipedia.org/wiki/Web_colors
-    ## Examples:
-    ## - "#000",    // black
-    ## - "#FFF",    // white
-    ## - "#0F0",    // lime
-    ## - "#000000", // black
-    ## - "#FFFFFF", // white
-    ## - "#00FF00", // lime
-    ## - "#FFA07A", // light salmon
-    ## - "#9932CC"  // dark orchid
-    color*:string # Hexadecimal color code
 
   ControllerHandshake* = ref object of Message
     ## Controller handshake
@@ -246,38 +216,6 @@ type
 
   GameResumedEventForObserver* = ref object of Message
     ## Event occurring when a game is resumed from a previous pause
-
-  GameSetup* = ref object of RootObj
-    ## Game setup
-    gameType*:string # Type of game
-    arenaWidth*:int # Width of arena measured in units
-    isArenaWidthLocked*:bool # Flag specifying if the width of arena is fixed for this game type
-    arenaHeight*:int # Height of arena measured in units
-    isArenaHeightLocked*:bool # Flag specifying if the height of arena is fixed for this game type
-    minNumberOfParticipants*:int # Minimum number of bots participating in battle
-    isMinNumberOfParticipantsLocked*:bool # Flag specifying if the minimum number of bots participating in battle
-    maxNumberOfParticipants*:int # Maximum number of bots participating in battle
-    isMaxNumberOfParticipantsLocked*:bool # Flag specifying if the maximum number of bots participating in battle
-    numberOfRounds*:int # Number of rounds in battle
-    isNumberOfRoundsLocked*:bool # Flag specifying if the number-of-rounds is fixed for this game type
-    gunCoolingRate*:float # Gun cooling rate. The gun needs to cool down to a gun heat of zero
-    isGunCoolingRateLocked*:bool # Flag specifying if the gun cooling rate is fixed for this game type
-    maxInactivityTurns*:int # Maximum number of inactive turns allowed, where a bot does not take
-    isMaxInactivityTurnsLocked*:bool # Flag specifying if the inactive turns is fixed for this game type
-    turnTimeout*:int # Turn timeout in microseconds (1 / 1,000,000 second) for sending intent
-    isTurnTimeoutLocked*:bool # Flag specifying if the turn timeout is fixed for this game type
-    readyTimeout*:int # Time limit in microseconds (1 / 1,000,000 second) for sending ready
-    isReadyTimeoutLocked*:bool # Flag specifying if the ready timeout is fixed for this game type
-    defaultTurnsPerSecond*:int # Default number of turns to show per second for an observer/UI
-
-  GameStartedEventForBot* = ref object of Message
-    ## Event occurring when a new game has started. Gives game info for a bot.
-    myId*:int # My id is an unique id of this bot
-    startX*:float # Start x coordinate
-    startY*:float # Start x coordinate
-    startDirection*:float # Direction of the body, gun, and radar in degrees
-    teammateIds*:seq[int] # The IDs of the teammates in the team that this bot is a member of
-    gameSetup*:GameSetup # Game setup
 
   GameStartedEventForObserver* = ref object of Message
     ## Event occurring when a new game has started. Gives game info for an observer.
@@ -323,20 +261,6 @@ type
 
   PauseGame* = ref object of Message
     ## Command to pause a game
-
-  ResultsForBot* = ref object of RootObj
-    ## Individual participants results visible for a bot, where name and version is hidden.
-    rank*:int # Rank/placement, where 1 is 1st place, 4 is 4th place etc.
-    survival*:int # Survival score gained whenever another opponent is defeated
-    lastSurvivorBonus*:int # Last survivor score as last survivor in a round
-    bulletDamage*:int # Bullet damage given
-    bulletKillBonus*:int # Bullet kill bonus
-    ramDamage*:int # Ram damage given
-    ramKillBonus*:int # Ram kill bonus
-    totalScore*:int # Total score
-    firstPlaces*:int # Number of 1st places
-    secondPlaces*:int # Number of 2nd places
-    thirdPlaces*:int # Number of 3rd places
 
   ResultsForObserver* = ref object of ResultsForBot
     ## Individual participant results visible for an observer, where id, name, and version is available as well.
@@ -426,19 +350,97 @@ type
   WonRoundEvent* = ref object of Event
     ## Event occurring when a bot has won the round
 
+  GameSetup* = ref object of RootObj
+    ## Game setup
+    gameType*:string # Type of game
+    arenaWidth*:int # Width of arena measured in units
+    isArenaWidthLocked*:bool # Flag specifying if the width of arena is fixed for this game type
+    arenaHeight*:int # Height of arena measured in units
+    isArenaHeightLocked*:bool # Flag specifying if the height of arena is fixed for this game type
+    minNumberOfParticipants*:int # Minimum number of bots participating in battle
+    isMinNumberOfParticipantsLocked*:bool # Flag specifying if the minimum number of bots participating in battle
+    maxNumberOfParticipants*:int # Maximum number of bots participating in battle (is optional)
+    isMaxNumberOfParticipantsLocked*:bool # Flag specifying if the maximum number of bots participating in battle
+    numberOfRounds*:int # Number of rounds in battle
+    isNumberOfRoundsLocked*:bool # Flag specifying if the number-of-rounds is fixed for this game type
+    gunCoolingRate*:float # Gun cooling rate. The gun needs to cool down to a gun heat of zero
+    isGunCoolingRateLocked*:bool # Flag specifying if the gun cooling rate is fixed for this game type
+    maxInactivityTurns*:int # Maximum number of inactive turns allowed, where a bot does not take
+    isMaxInactivityTurnsLocked*:bool # Flag specifying if the inactive turns is fixed for this game type
+    turnTimeout*:int # Turn timeout in microseconds (1 / 1,000,000 second) for sending intent
+    isTurnTimeoutLocked*:bool # Flag specifying if the turn timeout is fixed for this game type
+    readyTimeout*:int # Time limit in microseconds (1 / 1,000,000 second) for sending ready
+    isReadyTimeoutLocked*:bool # Flag specifying if the ready timeout is fixed for this game type
+    defaultTurnsPerSecond*:int # Default number of turns to show per second for an observer/UI
+
+  GameStartedEventForBot* = ref object of Message
+    ## Event occurring when a new game has started. Gives game info for a bot.
+    myId*:int # My id is an unique id of this bot
+    startX*:float # Start x coordinate
+    startY*:float # Start y coordinate
+    startDirection*:float # Direction of the body, gun, and radar in degrees
+    teammateIds*:seq[int] # The IDs of the teammates in the team that this bot is a member of
+    gameSetup*:GameSetup # Game setup
+
+  BotHitBotEvent* = ref object of Event
+    ## Event occurring when a bot has collided with another bot
+    victimId*:int # id of the victim bot that got hit
+    botId*:int # id of the bot that hit another bot
+    energy*:float # Remaining energy level of the victim bot
+    x*:float # X coordinate of victim bot
+    y*:float # Y coordinate of victim bot
+    rammed*:bool # Flag specifying, if the victim bot got rammed
+
+  BulletHitBotEvent* = ref object of Event
+    ## Event occurring when a bot has been hit by a bullet from another bot
+    victimId*:int # id of the bot that got hit
+    bullet*:BulletState # Bullet that hit the bot
+    damage*:float # Damage inflicted by the bullet
+    energy*:float # Remaining energy level of the bot that got hit
+
+  ResultsForBot* = ref object of RootObj
+    ## Individual participants results visible for a bot, where name and version is hidden.
+    rank*:int # Rank/placement, where 1 is 1st place, 4 is 4th place etc.
+    survival*:int # Survival score gained whenever another opponent is defeated
+    lastSurvivorBonus*:int # Last survivor score as last survivor in a round
+    bulletDamage*:int # Bullet damage given
+    bulletKillBonus*:int # Bullet kill bonus
+    ramDamage*:int # Ram damage given
+    ramKillBonus*:int # Ram kill bonus
+    totalScore*:int # Total score
+    firstPlaces*:int # Number of 1st places
+    secondPlaces*:int # Number of 2nd places
+    thirdPlaces*:int # Number of 3rd places
+
+  HitByBulletEvent* = ref object of Event
+    ## Event generate by API when your bot has been hit by a bullet from another bot
+    bullet*:BulletState # Bullet that hit the bot
+    damage*:float # Damage inflicted by the bullet
+    energy*:float # Remaining energy level of the bot that got hit
+
 proc json2message*(json_message:string):Message =
   let `type` = json_message.fromJson(Message).`type`
   case `type`:
     of Type.event:
       result = json_message.fromJson(Event)
+    of Type.botDeathEvent:
+      result = json_message.fromJson(BotDeathEvent)
     of Type.botHandshake:
       result = json_message.fromJson(BotHandshake)
+    of Type.botHitWallEvent:
+      result = json_message.fromJson(BotHitWallEvent)
     of Type.botIntent:
       result = json_message.fromJson(BotIntent)
     of Type.botListUpdate:
       result = json_message.fromJson(BotListUpdate)
     of Type.botReady:
       result = json_message.fromJson(BotReady)
+    of Type.bulletFiredEvent:
+      result = json_message.fromJson(BulletFiredEvent)
+    of Type.bulletHitBulletEvent:
+      result = json_message.fromJson(BulletHitBulletEvent)
+    of Type.bulletHitWallEvent:
+      result = json_message.fromJson(BulletHitWallEvent)
     of Type.changeTps:
       result = json_message.fromJson(ChangeTps)
     of Type.controllerHandshake:
@@ -453,8 +455,6 @@ proc json2message*(json_message:string):Message =
       result = json_message.fromJson(GamePausedEventForObserver)
     of Type.gameResumedEventForObserver:
       result = json_message.fromJson(GameResumedEventForObserver)
-    of Type.gameStartedEventForBot:
-      result = json_message.fromJson(GameStartedEventForBot)
     of Type.gameStartedEventForObserver:
       result = json_message.fromJson(GameStartedEventForObserver)
     of Type.nextTurn:
@@ -471,13 +471,33 @@ proc json2message*(json_message:string):Message =
       result = json_message.fromJson(RoundEndedEventForObserver)
     of Type.roundStartedEvent:
       result = json_message.fromJson(RoundStartedEvent)
+    of Type.scannedBotEvent:
+      result = json_message.fromJson(ScannedBotEvent)
     of Type.serverHandshake:
       result = json_message.fromJson(ServerHandshake)
+    of Type.skippedTurnEvent:
+      result = json_message.fromJson(SkippedTurnEvent)
     of Type.startGame:
       result = json_message.fromJson(StartGame)
     of Type.stopGame:
       result = json_message.fromJson(StopGame)
+    of Type.teamMessageEvent:
+      result = json_message.fromJson(TeamMessageEvent)
+    of Type.tickEventForBot:
+      result = json_message.fromJson(TickEventForBot)
+    of Type.tickEventForObserver:
+      result = json_message.fromJson(TickEventForObserver)
     of Type.tpsChangedEvent:
       result = json_message.fromJson(TpsChangedEvent)
+    of Type.wonRoundEvent:
+      result = json_message.fromJson(WonRoundEvent)
+    of Type.gameStartedEventForBot:
+      result = json_message.fromJson(GameStartedEventForBot)
+    of Type.botHitBotEvent:
+      result = json_message.fromJson(BotHitBotEvent)
+    of Type.bulletHitBotEvent:
+      result = json_message.fromJson(BulletHitBotEvent)
+    of Type.hitByBulletEvent:
+      result = json_message.fromJson(HitByBulletEvent)
     else:
       result = json_message.fromJson(Message)

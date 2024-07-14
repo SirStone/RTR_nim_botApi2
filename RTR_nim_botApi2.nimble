@@ -15,7 +15,7 @@ requires "ws >= 0.5.0"
 requires "trick >= 0.1.7"
 
 # Robocode Tank Royale Version/Tag
-let RTR_Version = "v0.23.2"
+let RTR_Version = "v0.24.1"
 
 # Robocode Tank Royale github repo
 let RTR_repo = "robocode-dev/tank-royale"
@@ -27,7 +27,7 @@ let RTR_git = "https://github.com/" & RTR_repo & ".git"
 let RTR_api_repos = "https://api.github.com/repos/" & RTR_repo
 
 # Asset folder
-let asset_folder = "assets/schemas"
+let asset_folder = "assets/tank-royale/schema/schemas"
 
 # Schemas.nim folder
 let schemas_nim = "src/RTR_nim_botApi2"
@@ -38,8 +38,14 @@ let assets2nim_bin_folder = "bin/assets_tools"
 # runnable assets folder
 let runnable_assets_folder = "assets/RTR"
 
+# server secret for bots
+let server_secret = "ciao"
+
+# server port
+let server_port = "7654"
+
 # Tasks
-task asset_tankRoyale, "checks and downloads the asset tank-royale":
+task download_asset_tankRoyale, "checks and downloads the asset tank-royale":
   echo("Robocode Tank Royale Version: ",RTR_Version)
 
   # Check if the 'assets' folder exists
@@ -75,16 +81,22 @@ task asset_tankRoyale, "checks and downloads the asset tank-royale":
     else:
       echo("Error code: ", errCode)
 
-task asset_schemas, "checks and downloads the asset schemas":
-  echo("Robocode Tank Royale Version: ",RTR_Version)
+# task download_asset_schemas, "checks and downloads the asset schemas":
+#   echo("Robocode Tank Royale Version: ",RTR_Version)
 
-  # Make sure that the asset folder exists
-  if not fileExists(asset_folder):
-    exec "mkdir -p " & asset_folder
+#   # Dowlete the folder if the folder exists
+#   if fileExists(asset_folder):
+#     exec "rm -r " & asset_folder
 
-  if not fileExists(asset_folder & "/README.md"):
-    # echo "curl " & RTR_api_repos & "/contents/schema/schemas " & "| grep download_url | cut -d'\"' -f4 >> " & download_list
-    exec "curl " & RTR_api_repos & "/contents/schema/schemas " & "| grep download_url | cut -d'\"' -f4 | xargs wget -q -nH --cut-dirs=4 --directory-prefix=" & asset_folder
+#   # Recreate the empty folder
+#   exec "mkdir -p " & asset_folder
+
+#   # Download the schemas from the RTR_api_repos
+#   # echo "curl " & RTR_api_repos & "/contents/schema/schemas " & "| grep download_url | cut -d'\"' -f4 >> " & download_list
+#   exec "curl " & RTR_api_repos & "/contents/schema/schemas " & "| grep download_url | cut -d'\"' -f4 | xargs wget -q -nH --cut-dirs=4 --directory-prefix=" & asset_folder
+
+#   # Remove all files that don't have the .yaml extension
+#   exec "find " & asset_folder & " -type f ! -name '*.yaml' -delete"
 
 task build_schemas, "builds the Schemas.nim file from yaml assets":
   # Make sure that the asset_tools folder exists
@@ -94,7 +106,7 @@ task build_schemas, "builds the Schemas.nim file from yaml assets":
   # Compile the schemas2nim.nim file inside the bin folder
   exec "nim c --run -d:release --deepcopy:on --outdir:" & assets2nim_bin_folder & "/schemas2nim src/RTR_nim_botApi2/assets_tools/schemas2nim.nim " & asset_folder & " " & schemas_nim
 
-task download_runnables, "downloads the SERVER, GUI and SampleRobots in the assets/RTR folder":
+task download_asset_runnables, "downloads the SERVER, GUI and SampleRobots in the assets/RTR folder":
   # make sure that the assets/RTR folder exists
   if not fileExists(runnable_assets_folder):
     exec "mkdir -p " & runnable_assets_folder
@@ -153,26 +165,39 @@ task download_runnables, "downloads the SERVER, GUI and SampleRobots in the asse
     # remove the zip file
     exec "rm " & output_sample_robots_file
 
-task download_all_assets, "downloads all the assets":
-  let (tr_output, tr_error) = gorgeEx "nimble asset_tankRoyale"
-  echo "tr_output: ", tr_output
-  let (as_output, as_error) = gorgeEx "nimble asset_schemas"
-  let (dr_output, dr_error) = gorgeEx "nimble download_runnables"
+task download_asset_all, "downloads all the assets":
+  let (tr_output, tr_error) = gorgeEx "nimble download_asset_tankRoyale"
+  # let (as_output, as_error) = gorgeEx "nimble download_asset_schemas"
+  let (dr_output, dr_error) = gorgeEx "nimble download_asset_runnables"
 
 task run_server, "runs the Robocode Tank Royale server (current version: " & RTR_Version & ")":
   let version_with_v = RTR_Version.replace("v", "")
   let output_server_file = runnable_assets_folder & "/robocode-tankroyale-server-" & version_with_v & ".jar"
-  exec "java -jar " & output_server_file
+  # exec "java -jar " & output_server_file & " -p " & server_port
+  # export the server secret
+  let (export_output, export_error) = gorgeEx "export SERVER_SECRET=" & server_secret
+  echo "export_output: ", export_output
+
+  #export the server url
+  exec "export SERVER_URL=ws://localhost:" & server_port
+
+  echo "Server secret: ", server_secret
+
+  # run the server
+  exec "java -jar " & output_server_file & " -p " & server_port & " -b " & server_secret
 
 task run_gui, "runs the Robocode Tank Royale GUI (current version: " & RTR_Version & ")":
   let version_with_v = RTR_Version.replace("v", "")
   let output_gui_file = runnable_assets_folder & "/robocode-tankroyale-gui-" & version_with_v & ".jar"
   exec "java -jar " & output_gui_file
+  rmFile("config.properties")
+  rmFile("server.properties")
+  rmFile("games.properties")
 
 # before build we need...
 # before build:
   # ...to check and download the asset tank-royale
-  # asset_tankRoyaleTask() //not required
+  # download_asset_tankRoyaleTask() //not required
   # asset_schemasTask() //not required
 
 # before test:

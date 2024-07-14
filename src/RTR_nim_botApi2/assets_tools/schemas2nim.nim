@@ -24,9 +24,15 @@ type
 var events: seq[Event] = @[]
 
 # statics
-const schemas_folder = "../../../assets/schemas"
-const schemas_file = "../../RTR_nim_botApi2/Schemas.nim"
 const imports = @["jsony", "json"]
+
+# from args
+if paramCount() < 2:
+  echo "Usage: nim c --run --deepcopy:on --outdir:<schemas_bin_folder> schemas2nim.nim <schemas_folder> <schemas_output_folder>"
+  quit(0)
+
+let schemas_folder = paramStr(1)
+var schemas_file = paramStr(2) & "/Schemas.nim"
 
 # strings sections
 var imports_section = "import "
@@ -42,7 +48,7 @@ proc addEnum(e: string) =
   let event = e.replace("-", "_")
 
   # add the event to the enums section
-  enums_section.add("    " & event.toCamelCase() & " = \""& event.toCamelCase(firstUpper = true) & "\"\n")
+  enums_section.add("    " & event.toCamelCase() & " = \"" & event.toCamelCase(firstUpper = true) & "\"\n")
 
 # proc to get all yaml files in the 'assets/schemas' folder and return a list
 proc get_yaml_files(): seq[string] =
@@ -51,7 +57,6 @@ proc get_yaml_files(): seq[string] =
   for kind, path in walkDir(schemas_folder):
     if kind == pcFile and path.endsWith(".yaml"):
       result.add(path)
-
 
 proc `$`(p: Property): string =
   result = "    "
@@ -83,8 +88,7 @@ proc `$`(e: Event): string =
 proc yaml2nim(yaml_file: string) =
   # read the yaml file from disk
   try:
-    let path: string = joinPath(getAppDir(), yaml_file)
-    let content: string = readFile(path)
+    let content: string = readFile(yaml_file)
 
     # variables to gather
     var
@@ -120,7 +124,12 @@ proc yaml2nim(yaml_file: string) =
           current_event.ref_object_of = value.strip().removeYamlExtension().toCamelCase(firstUpper = true)
 
         of "    $ref":
-          current_property.ref_object_of = value.strip().removeYamlExtension().toCamelCase(firstUpper = true)
+          var ref_object_of = value.strip().removeYamlExtension().toCamelCase(firstUpper = true)
+
+          # change Color in string
+          if ref_object_of == "Color": ref_object_of = "string"
+          
+          current_property.ref_object_of = ref_object_of
 
         of "properties":
           current_property = Property()
@@ -218,10 +227,11 @@ proc main() =
   for imp in imports: addImport(imp)
 
   # get the list of yaml files
-  let yaml_files = get_yaml_files()
+  var yaml_files = get_yaml_files()
   
   # iterate over the yaml files
   for yaml_file in yaml_files:
+    if yaml_file == schemas_folder/"color.yaml": continue
     yaml2nim(yaml_file)
 
   # open schema_file in writing mode
@@ -245,6 +255,7 @@ proc main() =
 
   # write the enums section
   for event in events:
+    if event.id == "color": continue
     addEnum(event.id)
   file.writeLine(enums_section)
 
@@ -257,7 +268,9 @@ proc main() =
   file.writeLine("  let `type` = json_message.fromJson(Message).`type`")
   file.writeLine("  case `type`:")
   for event in events:
-    if event.id != "message" and event.ref_object_of == "Message":
+    if event.id != "message" and event.ref_object_of == "Message" or event.ref_object_of == "Event":
+      echo event.id, " - ", event.ref_object_of
+
       file.writeLine("    of Type." & event.id.toCamelCase() & ":")
       file.writeLine("      result = json_message.fromJson(" & event.id.toCamelCase(firstUpper = true) & ")")
   file.writeLine("    else:")
