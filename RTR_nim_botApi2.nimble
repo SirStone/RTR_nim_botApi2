@@ -1,7 +1,7 @@
 import streams
 
 # Package
-version       = "0.21.3"
+version       = "0.21.4"
 author        = "SirStone"
 description   = "Version2 of this library, for nim2.0"
 license       = "GPL-3.0-only"
@@ -15,7 +15,7 @@ requires "ws >= 0.5.0"
 requires "trick >= 0.1.7"
 
 # Robocode Tank Royale Version/Tag
-let RTR_Version = "v0.24.1"
+let RTR_Version = "v0.24.4"
 
 # Robocode Tank Royale github repo
 let RTR_repo = "robocode-dev/tank-royale"
@@ -39,7 +39,10 @@ let assets2nim_bin_folder = "bin/assets_tools"
 let runnable_assets_folder = "assets/RTR"
 
 # server secret for bots
-let server_secret = "ciao"
+let bot_secret = "bot_secret"
+
+# server secret for controllers and observers
+let controller_secret = "controller_secret"
 
 # server port
 let server_port = "7654"
@@ -173,18 +176,35 @@ task download_asset_all, "downloads all the assets":
 task run_server, "runs the Robocode Tank Royale server (current version: " & RTR_Version & ")":
   let version_with_v = RTR_Version.replace("v", "")
   let output_server_file = runnable_assets_folder & "/robocode-tankroyale-server-" & version_with_v & ".jar"
-  # exec "java -jar " & output_server_file & " -p " & server_port
-  # export the server secret
-  let (export_output, export_error) = gorgeEx "export SERVER_SECRET=" & server_secret
-  echo "export_output: ", export_output
+  let server_url = "ws://localhost:" & server_port
 
-  #export the server url
-  exec "export SERVER_URL=ws://localhost:" & server_port
+  # remove the server secret from the environment (end from .bashrc)
+  exec "unset SERVER_SECRET && sed -i '/SERVER_SECRET/d' ~/.bashrc"
+  # export the server secret to the environment (and to .bashrc)
+  exec "export SERVER_SECRET=" & bot_secret & " && echo 'SERVER_SECRET=" & bot_secret & "' >> ~/.bashrc"
 
-  echo "Server secret: ", server_secret
+  # remove the server url from the environment (end from .bashrc)
+  exec "unset SERVER_URL && sed -i '/SERVER_URL/d' ~/.bashrc"
+  # export the server url to the environment (and to .bashrc)
+  exec "export SERVER_URL=" & server_url & " && echo 'SERVER_URL=" & server_url & "' >> ~/.bashrc"
 
+  # remove the controller secret from the environment (end from .bashrc)
+  exec "unset CONTROLLER_SECRET && sed -i '/CONTROLLER_SECRET/d' ~/.bashrc"
+  # export the controller secret to the environment (and to .bashrc)
+  exec "export CONTROLLER_SECRET=" & controller_secret & " && echo 'CONTROLLER_SECRET=" & controller_secret & "' >> ~/.bashrc"
+
+  echo "SERVER_URL=", server_url
+  echo "SERVER_SECRET=", bot_secret
+  
   # run the server
-  exec "java -jar " & output_server_file & " -p " & server_port & " -b " & server_secret
+  try:
+    exec "java -jar " & output_server_file & " -p " & server_port & " -b " & bot_secret & " -c " & controller_secret
+  except:
+    echo "Removing the secrets from the environment"
+    # remove the server secrets from the environment (end from .bashrc)
+    exec "unset SERVER_SECRET && sed -i '/SERVER_SECRET/d' ~/.bashrc"
+    exec "unset SERVER_URL && sed -i '/SERVER_URL/d' ~/.bashrc"
+    exec "unset CONTROLLER_SECRET && sed -i '/CONTROLLER_SECRET/d' ~/.bashrc"
 
 task run_gui, "runs the Robocode Tank Royale GUI (current version: " & RTR_Version & ")":
   let version_with_v = RTR_Version.replace("v", "")
