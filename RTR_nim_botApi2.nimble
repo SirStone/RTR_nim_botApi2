@@ -1,7 +1,7 @@
 import streams
 
 # Package
-version       = "0.21.4"
+version       = "0.21.5"
 author        = "SirStone"
 description   = "Version2 of this library, for nim2.0"
 license       = "GPL-3.0-only"
@@ -15,7 +15,7 @@ requires "ws >= 0.5.0"
 requires "trick >= 0.1.7"
 
 # Robocode Tank Royale Version/Tag
-let RTR_Version = "v0.24.4"
+let RTR_Version = "v0.25.0"
 
 # Robocode Tank Royale github repo
 let RTR_repo = "robocode-dev/tank-royale"
@@ -27,7 +27,7 @@ let RTR_git = "https://github.com/" & RTR_repo & ".git"
 let RTR_api_repos = "https://api.github.com/repos/" & RTR_repo
 
 # Asset folder
-let asset_folder = "assets/tank-royale/schema/schemas"
+let asset_folder = "assets/tank-royale/schema/schemas/game"
 
 # Schemas.nim folder
 let schemas_nim = "src/RTR_nim_botApi2"
@@ -83,23 +83,6 @@ task download_asset_tankRoyale, "checks and downloads the asset tank-royale":
         # echo outStr # uncomeent for debugging
     else:
       echo("Error code: ", errCode)
-
-# task download_asset_schemas, "checks and downloads the asset schemas":
-#   echo("Robocode Tank Royale Version: ",RTR_Version)
-
-#   # Dowlete the folder if the folder exists
-#   if fileExists(asset_folder):
-#     exec "rm -r " & asset_folder
-
-#   # Recreate the empty folder
-#   exec "mkdir -p " & asset_folder
-
-#   # Download the schemas from the RTR_api_repos
-#   # echo "curl " & RTR_api_repos & "/contents/schema/schemas " & "| grep download_url | cut -d'\"' -f4 >> " & download_list
-#   exec "curl " & RTR_api_repos & "/contents/schema/schemas " & "| grep download_url | cut -d'\"' -f4 | xargs wget -q -nH --cut-dirs=4 --directory-prefix=" & asset_folder
-
-#   # Remove all files that don't have the .yaml extension
-#   exec "find " & asset_folder & " -type f ! -name '*.yaml' -delete"
 
 task build_schemas, "builds the Schemas.nim file from yaml assets":
   # Make sure that the asset_tools folder exists
@@ -170,7 +153,6 @@ task download_asset_runnables, "downloads the SERVER, GUI and SampleRobots in th
 
 task download_asset_all, "downloads all the assets":
   let (tr_output, tr_error) = gorgeEx "nimble download_asset_tankRoyale"
-  # let (as_output, as_error) = gorgeEx "nimble download_asset_schemas"
   let (dr_output, dr_error) = gorgeEx "nimble download_asset_runnables"
 
 task run_server, "runs the Robocode Tank Royale server (current version: " & RTR_Version & ")":
@@ -213,6 +195,9 @@ task run_gui, "runs the Robocode Tank Royale GUI (current version: " & RTR_Versi
   rmFile("config.properties")
   rmFile("server.properties")
   rmFile("games.properties")
+
+task run_alternative_gui, "runs my aI":
+  exec "pushd ../RobocodeTankRoyale-alternative-Web-GUI/ && node app.js && popd"
 
 # before build we need...
 # before build:

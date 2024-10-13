@@ -38,8 +38,8 @@ var schemas_file = paramStr(2) & "/Schemas.nim"
 var imports_section = "import "
 var enums_section = "type\n  Type* = enum\n"
 
-# proc to remove the ".yaml" extension from a file
-proc removeYAMLExtension(file: string): string = file[0..^6]
+# proc to remove the ".schema.yaml" extension from a file
+proc removeSchemaYAMLExtension(file: string): string = file[0..^13]
 
 proc addImport(imp: string) = imports_section.add(imp&", ")
 
@@ -65,7 +65,8 @@ proc `$`(p: Property): string =
   else: result.add(p.name & "*:")
 
   if p.kind == "array":
-    result.add("seq[" & p.ref_object_of & "]")
+    if p.ref_object_of != "Event": result.add("seq[" & p.ref_object_of & "]")
+    else: result.add("JsonNode")
   else: 
     if p.kind == "":
       result.add(p.ref_object_of)
@@ -112,7 +113,8 @@ proc yaml2nim(yaml_file: string) =
 
         case key:
         of "$id":
-          current_event.id = value.strip().removeYamlExtension()
+          current_event.id = value.strip().removeSchemaYamlExtension()
+          echo "ID: ", current_event.id
         
         of "description":
           if value.strip() == "|":
@@ -121,10 +123,10 @@ proc yaml2nim(yaml_file: string) =
             current_event.description = "## " & value.strip()
           
         of "  $ref":
-          current_event.ref_object_of = value.strip().removeYamlExtension().toCamelCase(firstUpper = true)
+          current_event.ref_object_of = value.strip().removeSchemaYamlExtension().toCamelCase(firstUpper = true)
 
         of "    $ref":
-          var ref_object_of = value.strip().removeYamlExtension().toCamelCase(firstUpper = true)
+          var ref_object_of = value.strip().removeSchemaYamlExtension().toCamelCase(firstUpper = true)
 
           # change Color in string
           if ref_object_of == "Color": ref_object_of = "string"
@@ -156,7 +158,7 @@ proc yaml2nim(yaml_file: string) =
             current_property.ref_object_of = "bool"
 
         of "      $ref":
-          current_property.ref_object_of = value.strip().removeYamlExtension().toCamelCase(firstUpper = true)
+          current_property.ref_object_of = value.strip().removeSchemaYamlExtension().toCamelCase(firstUpper = true)
 
         of "    enum":
           current_property.kind = "Type"
