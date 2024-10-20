@@ -1,6 +1,6 @@
 # ----------------how to start a new bot----------------
 import ../../../RTR_nim_botApi2    # import the bot api
-startBot newBot("Walls.json") # start the bot
+startBot(json_file="Walls.json", position=InitialPosition(x:400, y:300, direction:45)) # start the bot
 # --------------end, the rest is up to you--------------
 
 import std/[math]
@@ -31,11 +31,11 @@ method run(bot:Bot) =
   
   # Turn the gun to turn right 90 degrees.
   peek = true
-  bot.turnGunRight(90)
+  bot.gunTurnRight(90)
   bot.turnRight(90)
 
   # Main loop
-  while bot.isRunning():
+  while isRunning():
     # Peek before we turn when forward() completes
     peek = true
     # Move up the wall
@@ -56,8 +56,8 @@ method onHitBot(bot:Bot, bot_hit_bot_event:BotHitBotEvent) =
 
 # We scanned another bot -> fire!
 method onScannedBot(bot:Bot, scanned_bot_event:ScannedBotEvent) =
-  bot.log "Walls scanned a bot at turn ", scanned_bot_event.turnNumber, " and peek is ", peek
-  bot.fire(2)
+  discard bot.fire(2)
+
   # Note that scan is called automatically when the bot is turning.
   # By calling it manually here, we make sure we generate another scan event if there's a bot
   # on the next wall, so that we do not start moving up it until it's gone.

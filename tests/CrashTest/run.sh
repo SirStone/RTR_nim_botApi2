@@ -21,5 +21,5 @@ done
 # Remove the extension from the file name
 bot_name="CrashTest"
 
-nim c --run $script_dir/$bot_name.nim
+nim c --deepcopy:on --run $script_dir/$bot_name.nim
 rm $script_dir/$bot_name

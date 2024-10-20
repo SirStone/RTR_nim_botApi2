@@ -1,7 +1,7 @@
 import streams
 
 # Package
-version       = "0.21.5"
+version       = "0.22.0"
 author        = "SirStone"
 description   = "Version2 of this library, for nim2.0"
 license       = "GPL-3.0-only"

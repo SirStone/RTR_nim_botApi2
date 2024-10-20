@@ -114,7 +114,6 @@ proc yaml2nim(yaml_file: string) =
         case key:
         of "$id":
           current_event.id = value.strip().removeSchemaYamlExtension()
-          echo "ID: ", current_event.id
         
         of "description":
           if value.strip() == "|":
@@ -123,10 +122,25 @@ proc yaml2nim(yaml_file: string) =
             current_event.description = "## " & value.strip()
           
         of "  $ref":
-          current_event.ref_object_of = value.strip().removeSchemaYamlExtension().toCamelCase(firstUpper = true)
+          echo "ID: ", current_event.id
+          # hadle special case: Message --> Event
+          case current_event.id: 
+          of "game-started-event-for-bot":
+            current_event.ref_object_of = "Event"
+          of "game-ended-event-for-bot":
+            current_event.ref_object_of = "Event"
+          of "game-aborted-event":
+            current_event.ref_object_of = "Event"
+          of "round-started-event":
+            current_event.ref_object_of = "Event"
+          of "round-ended-event-for-bot":
+            current_event.ref_object_of = "Event"
+          else: # get the actual ref_object_of
+            current_event.ref_object_of = value.strip().removeSchemaYamlExtension().toCamelCase(firstUpper = true)
 
         of "    $ref":
-          var ref_object_of = value.strip().removeSchemaYamlExtension().toCamelCase(firstUpper = true)
+          var ref_object_of = ""
+          ref_object_of = value.strip().removeSchemaYamlExtension().toCamelCase(firstUpper = true)
 
           # change Color in string
           if ref_object_of == "Color": ref_object_of = "string"
@@ -187,7 +201,14 @@ proc yaml2nim(yaml_file: string) =
               properties.add(current_property.deepCopy())
 
             # start modify the new properties
-            current_property = Property(name: key.strip())
+            let property_name = key.strip()
+            if current_event.id == "round-ended-event-for-bot":
+              if property_name == "roundNumber" or property_name == "turnNumber":
+                discard
+              else:
+                current_property = Property(name: property_name)
+            else:
+              current_property = Property(name: property_name)
             
       else: # case the split result is not 2
         if is_example:
@@ -277,6 +298,10 @@ proc main() =
       file.writeLine("      result = json_message.fromJson(" & event.id.toCamelCase(firstUpper = true) & ")")
   file.writeLine("    else:")
   file.writeLine("      result = json_message.fromJson(Message)")
+
+  # write the isCritical proc
+  file.writeLine("")
+  file.writeLine("proc isCritical*(event:Event):bool = false")
 
   # close the file
   file.close()

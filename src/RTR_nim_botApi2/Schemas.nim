@@ -1,5 +1,5 @@
 # This file is generated automatically by the 'schemas2nim' script
-# Generated on: 2024-10-13T10:37:43Z (Italy time)
+# Generated on: 2024-10-19T16:24:01Z (Italy time)
 import jsony, json
 
 type
@@ -227,10 +227,10 @@ type
     author*:string # Author name, e.g. John Doe (john_doe@somewhere.net)
     secret*:string # Secret used for access control with the server
 
-  GameAbortedEvent* = ref object of Message
+  GameAbortedEvent* = ref object of Event
     ## Event occurring when game has been aborted. No score is available.
 
-  GameEndedEventForBot* = ref object of Message
+  GameEndedEventForBot* = ref object of Event
     ## Event occurring when game has ended. Gives all game results visible for a bot.
     numberOfRounds*:int # Number of rounds played
     results*:ResultsForBot # Bot results of the battle
@@ -269,7 +269,7 @@ type
     isReadyTimeoutLocked*:bool # Flag specifying if the ready timeout is fixed for this game type
     defaultTurnsPerSecond*:int # Default number of turns to show per second for an observer/UI
 
-  GameStartedEventForBot* = ref object of Message
+  GameStartedEventForBot* = ref object of Event
     ## Event occurring when a new game has started. Gives game info for a bot.
     myId*:int # My id is an unique id of this bot
     startX*:float # Start x coordinate
@@ -352,10 +352,8 @@ type
   ResumeGame* = ref object of Message
     ## Command to resume a game
 
-  RoundEndedEventForBot* = ref object of Message
+  RoundEndedEventForBot* = ref object of Event
     ## Event occurring when a round has ended. Gives all game results visible for a bot.
-    roundNumber*:int # The current round number in the battle when event occurred
-    turnNumber*:int # The current turn number in the round when event occurred
     results*:ResultsForBot # The accumulated bot results by the end of the round.
 
   RoundEndedEventForObserver* = ref object of Message
@@ -364,7 +362,7 @@ type
     turnNumber*:int # The current turn number in the round when event occurred
     results*:seq[ResultsForObserver] # The accumulated results for all bots by the end of the round.
 
-  RoundStartedEvent* = ref object of Message
+  RoundStartedEvent* = ref object of Event
     ## Event occurring when a new round has started.
     roundNumber*:int # The current round number in the battle when event occurred
 
@@ -515,3 +513,5 @@ proc json2message*(json_message:string):Message =
       result = json_message.fromJson(WonRoundEvent)
     else:
       result = json_message.fromJson(Message)
+
+proc isCritical*(event:Event):bool = false
